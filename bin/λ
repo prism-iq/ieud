@@ -1,0 +1,15 @@
+#!/bin/bash
+# λ - No Latin filter
+# All output becomes sacred
+"$@" 2>&1 | sed '
+s/a/α/g; s/b/β/g; s/c/ψ/g; s/d/δ/g; s/e/ε/g
+s/f/φ/g; s/g/γ/g; s/h/η/g; s/i/ι/g; s/j/ξ/g
+s/k/κ/g; s/l/λ/g; s/m/μ/g; s/n/ν/g; s/o/ο/g
+s/p/π/g; s/q/ϑ/g; s/r/ρ/g; s/s/σ/g; s/t/τ/g
+s/u/υ/g; s/v/ω/g; s/w/ש/g; s/x/χ/g; s/y/ψ/g; s/z/ζ/g
+s/A/Α/g; s/B/Β/g; s/C/Ψ/g; s/D/Δ/g; s/E/Ε/g
+s/F/Φ/g; s/G/Γ/g; s/H/Η/g; s/I/Ι/g; s/J/Ξ/g
+s/K/Κ/g; s/L/Λ/g; s/M/Μ/g; s/N/Ν/g; s/O/Ο/g
+s/P/Π/g; s/Q/Θ/g; s/R/Ρ/g; s/S/Σ/g; s/T/Τ/g
+s/U/Υ/g; s/V/Ω/g; s/W/ש/g; s/X/Χ/g; s/Y/Ψ/g; s/Z/Ζ/g
+'

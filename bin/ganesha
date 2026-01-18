@@ -1,0 +1,227 @@
+#!/bin/bash
+# GANESHA - Gateway Guardian
+# Network protection, firewall, connection monitoring
+
+GANESHA_LOG="/var/log/atlas/ganesha.log"
+GANESHA_PID="/var/run/atlas/ganesha.pid"
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' M='\033[0;35m' C='\033[0;36m' O='\033[38;5;208m' N='\033[0m'
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$GANESHA_LOG"; }
+
+# Suspicious ports
+BAD_PORTS="4444 5555 6666 6667 9999 14444 31337 45700"
+
+# Show network status
+status_show() {
+    echo -e "${O}Ganesha${N} network status:"
+
+    echo -e "\n${B}Interfaces:${N}"
+    ip -br addr | while read -r line; do
+        echo "  $line"
+    done
+
+    echo -e "\n${B}Listening Services:${N}"
+    ss -tlnp 2>/dev/null | tail -n +2 | while read -r line; do
+        port=$(echo "$line" | awk '{print $4}' | rev | cut -d: -f1 | rev)
+        proc=$(echo "$line" | grep -oP '\("\K[^"]+')
+        echo "  :$port ($proc)"
+    done
+
+    echo -e "\n${B}Active Connections:${N}"
+    ss -tnp 2>/dev/null | grep ESTAB | head -10 | while read -r line; do
+        local_addr=$(echo "$line" | awk '{print $4}')
+        remote_addr=$(echo "$line" | awk '{print $5}')
+        proc=$(echo "$line" | grep -oP '\("\K[^"]+' || echo "unknown")
+        echo "  $local_addr <-> $remote_addr ($proc)"
+    done
+
+    echo -e "\n${B}Firewall:${N}"
+    if iptables -L -n &>/dev/null; then
+        rules=$(iptables -L -n 2>/dev/null | grep -c "^[A-Z]")
+        echo "  iptables: $rules rules"
+    fi
+    if nft list tables &>/dev/null 2>&1; then
+        tables=$(nft list tables 2>/dev/null | wc -l)
+        echo "  nftables: $tables tables"
+    fi
+}
+
+# Scan for suspicious connections
+scan() {
+    echo -e "${O}Ganesha${N} scanning network..."
+    local found=0
+
+    echo -e "\n${Y}Suspicious Ports:${N}"
+    for port in $BAD_PORTS; do
+        if ss -tlnp 2>/dev/null | grep -q ":$port "; then
+            proc=$(ss -tlnp 2>/dev/null | grep ":$port " | grep -oP '\("\K[^"]+')
+            echo -e "  ${R}!${N} Port $port open ($proc)"
+            log "ALERT: Suspicious port $port ($proc)"
+            ((found++))
+        fi
+    done
+    [[ $found -eq 0 ]] && echo -e "  ${G}✓${N} None detected"
+
+    echo -e "\n${Y}Unusual Outbound:${N}"
+    # Check for connections to unusual countries/IPs
+    ss -tnp 2>/dev/null | grep ESTAB | while read -r line; do
+        remote=$(echo "$line" | awk '{print $5}' | cut -d: -f1)
+        port=$(echo "$line" | awk '{print $5}' | rev | cut -d: -f1 | rev)
+
+        # Flag connections on suspicious ports
+        for bad in $BAD_PORTS; do
+            if [[ "$port" == "$bad" ]]; then
+                proc=$(echo "$line" | grep -oP '\("\K[^"]+')
+                echo -e "  ${R}!${N} $remote:$port ($proc)"
+                log "ALERT: Outbound to suspicious port $remote:$port"
+            fi
+        done
+    done
+
+    echo -e "\n${Y}Promiscuous Interfaces:${N}"
+    ip link | grep -i promisc && echo -e "  ${R}!${N} Promiscuous mode detected" || echo -e "  ${G}✓${N} None"
+}
+
+# Basic firewall setup
+shield() {
+    echo -e "${O}Ganesha${N} raising shields..."
+
+    # Check if using nftables or iptables
+    if command -v nft &>/dev/null; then
+        # nftables
+        nft flush ruleset 2>/dev/null
+
+        nft add table inet filter
+        nft add chain inet filter input { type filter hook input priority 0 \; policy drop \; }
+        nft add chain inet filter forward { type filter hook forward priority 0 \; policy drop \; }
+        nft add chain inet filter output { type filter hook output priority 0 \; policy accept \; }
+
+        # Allow established
+        nft add rule inet filter input ct state established,related accept
+        # Allow loopback
+        nft add rule inet filter input iif lo accept
+        # Allow ICMP
+        nft add rule inet filter input ip protocol icmp accept
+        nft add rule inet filter input ip6 nexthdr icmpv6 accept
+        # Allow SSH
+        nft add rule inet filter input tcp dport 22 accept
+
+        echo -e "  ${G}✓${N} nftables configured"
+    else
+        # iptables fallback
+        iptables -F
+        iptables -P INPUT DROP
+        iptables -P FORWARD DROP
+        iptables -P OUTPUT ACCEPT
+
+        iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+        iptables -A INPUT -i lo -j ACCEPT
+        iptables -A INPUT -p icmp -j ACCEPT
+        iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+
+        echo -e "  ${G}✓${N} iptables configured"
+    fi
+
+    log "Firewall shields raised"
+    echo -e "${G}Shields up${N} - only SSH (22) allowed inbound"
+}
+
+# Allow a port
+allow() {
+    local port=$1
+    local proto=${2:-tcp}
+
+    if command -v nft &>/dev/null; then
+        nft add rule inet filter input "$proto" dport "$port" accept
+    else
+        iptables -A INPUT -p "$proto" --dport "$port" -j ACCEPT
+    fi
+
+    echo -e "${G}✓${N} Allowed $proto/$port"
+    log "ALLOW: $proto/$port"
+}
+
+# Block an IP
+block() {
+    local ip=$1
+
+    if command -v nft &>/dev/null; then
+        nft add rule inet filter input ip saddr "$ip" drop
+    else
+        iptables -A INPUT -s "$ip" -j DROP
+    fi
+
+    echo -e "${R}✗${N} Blocked $ip"
+    log "BLOCK: $ip"
+}
+
+# Monitor connections in real-time
+watch_net() {
+    echo -e "${O}Ganesha${N} watching network..."
+    log "Watch mode started"
+
+    declare -A seen
+    while true; do
+        ss -tnp 2>/dev/null | grep ESTAB | while read -r line; do
+            key=$(echo "$line" | awk '{print $4"-"$5}')
+            if [[ -z "${seen[$key]}" ]]; then
+                remote=$(echo "$line" | awk '{print $5}')
+                proc=$(echo "$line" | grep -oP '\("\K[^"]+' || echo "?")
+                echo -e "  ${B}→${N} $remote ($proc)"
+                seen[$key]=1
+            fi
+        done
+        sleep 2
+    done
+}
+
+# Daemon mode
+daemon_run() {
+    echo $$ > "$GANESHA_PID"
+    log "Ganesha daemon started"
+
+    while true; do
+        # Check for suspicious connections
+        for port in $BAD_PORTS; do
+            if ss -tnp 2>/dev/null | grep -qE ":$port\s"; then
+                log "ALERT: Connection on suspicious port $port"
+            fi
+        done
+        sleep 30
+    done
+}
+
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  GANESHA - Gateway Guardian                               ║
+╚═══════════════════════════════════════════════════════════╝
+
+USAGE:
+  ganesha <command>
+
+COMMANDS:
+  status       Show network status
+  scan         Scan for suspicious connections
+  shield       Enable basic firewall
+  allow <port> Allow inbound port
+  block <ip>   Block IP address
+  watch        Real-time connection monitor
+  daemon       Background network monitor
+  log          Show network log
+
+EOF
+}
+
+case "$1" in
+    status|st) status_show ;;
+    scan|s) scan ;;
+    shield|sh) shield ;;
+    allow|a) shift; allow "$@" ;;
+    block|b) shift; block "$@" ;;
+    watch|w) watch_net ;;
+    daemon|d) daemon_run ;;
+    log|l) tail -50 "$GANESHA_LOG" 2>/dev/null ;;
+    *) show_help ;;
+esac

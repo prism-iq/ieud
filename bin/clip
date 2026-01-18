@@ -1,0 +1,142 @@
+#!/bin/bash
+# Clipboard partagé entre tous les TTY/X/Wayland displays
+CLIP_FILE="/tmp/.shared_clipboard"
+CLIP_LOCK="/tmp/.shared_clipboard.lock"
+DISPLAYS=":0 :1 :2"
+
+# Check for Wayland
+get_wayland_clip() {
+    if [ -n "$WAYLAND_DISPLAY" ] || [ -S "${XDG_RUNTIME_DIR}/wayland-0" ]; then
+        wl-paste 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+set_wayland_clip() {
+    local content="$1"
+    if [ -n "$WAYLAND_DISPLAY" ] || [ -S "${XDG_RUNTIME_DIR}/wayland-0" ]; then
+        echo -n "$content" | wl-copy 2>/dev/null
+    fi
+}
+
+# Get from any available X11 display
+get_x11_clip() {
+    # Try current display first
+    if [ -n "$DISPLAY" ]; then
+        content=$(xclip -selection clipboard -o 2>/dev/null)
+        [ -n "$content" ] && echo -n "$content" && return 0
+    fi
+    # Try common displays
+    for disp in $DISPLAYS; do
+        if DISPLAY=$disp xdpyinfo &>/dev/null 2>&1; then
+            content=$(DISPLAY=$disp xclip -selection clipboard -o 2>/dev/null)
+            [ -n "$content" ] && echo -n "$content" && return 0
+        fi
+    done
+    return 1
+}
+
+sync_to_all_displays() {
+    local content="$1"
+    # X11
+    for disp in $DISPLAYS; do
+        if DISPLAY=$disp xdpyinfo &>/dev/null 2>&1; then
+            echo -n "$content" | DISPLAY=$disp xclip -selection clipboard 2>/dev/null
+            echo -n "$content" | DISPLAY=$disp xclip -selection primary 2>/dev/null
+        fi
+    done
+    # Wayland
+    set_wayland_clip "$content"
+}
+
+case "$1" in
+    copy|c)
+        (
+            flock -x 200
+            if [ -n "$2" ]; then
+                echo -n "$2" > "$CLIP_FILE"
+            else
+                cat > "$CLIP_FILE"
+            fi
+            chmod 666 "$CLIP_FILE" 2>/dev/null
+            content=$(cat "$CLIP_FILE")
+            sync_to_all_displays "$content"
+        ) 200>"$CLIP_LOCK"
+        ;;
+    paste|p|v)
+        (
+            flock -s 200
+            # Try Wayland first
+            content=$(get_wayland_clip)
+            if [ -n "$content" ]; then
+                echo -n "$content"
+                echo -n "$content" > "$CLIP_FILE"
+                exit 0
+            fi
+            # Try X11 displays (even from TTY)
+            content=$(get_x11_clip)
+            if [ -n "$content" ]; then
+                echo -n "$content"
+                echo -n "$content" > "$CLIP_FILE"
+                exit 0
+            fi
+            # Fallback to file
+            [ -f "$CLIP_FILE" ] && cat "$CLIP_FILE"
+        ) 200>"$CLIP_LOCK"
+        ;;
+    sync|s)
+        # Sync current GUI clipboard to file and all displays
+        content=$(get_wayland_clip)
+        [ -z "$content" ] && content=$(get_x11_clip)
+        if [ -n "$content" ]; then
+            echo -n "$content" > "$CLIP_FILE"
+            chmod 666 "$CLIP_FILE" 2>/dev/null
+            sync_to_all_displays "$content"
+            echo "Synced: ${content:0:50}..."
+        fi
+        ;;
+    watch|w)
+        # Daemon: watch and sync between all displays + file
+        echo "Watching clipboards..."
+        last_content=""
+        while true; do
+            # Check Wayland
+            content=$(get_wayland_clip)
+            # Check X11 if no Wayland content
+            [ -z "$content" ] && content=$(get_x11_clip)
+
+            if [ "$content" != "$last_content" ] && [ -n "$content" ]; then
+                echo -n "$content" > "$CLIP_FILE"
+                chmod 666 "$CLIP_FILE" 2>/dev/null
+                sync_to_all_displays "$content"
+                last_content="$content"
+            fi
+
+            # Also check if file changed (from TTY copy)
+            if [ -f "$CLIP_FILE" ]; then
+                file_content=$(cat "$CLIP_FILE" 2>/dev/null)
+                if [ "$file_content" != "$last_content" ] && [ -n "$file_content" ]; then
+                    sync_to_all_displays "$file_content"
+                    last_content="$file_content"
+                fi
+            fi
+
+            sleep 0.3
+        done
+        ;;
+    type|t)
+        content=$("$0" paste)
+        if [ -n "$content" ] && command -v xdotool &>/dev/null; then
+            xdotool type --clearmodifiers "$content"
+        fi
+        ;;
+    *)
+        echo "Usage: clip [copy|paste|sync|watch|type]"
+        echo "  copy, c   - Copy stdin/arg to shared clipboard"
+        echo "  paste, p  - Paste from GUI or shared clipboard"
+        echo "  sync, s   - Force sync current clipboard everywhere"
+        echo "  watch, w  - Daemon: auto-sync between all displays"
+        echo "  type, t   - Type clipboard content (xdotool)"
+        exit 1
+        ;;
+esac

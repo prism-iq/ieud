@@ -1,0 +1,278 @@
+#!/bin/bash
+# CLAUDE - Integrated AI Interface
+# Memory-aware, god-connected, flow-aligned
+
+CLAUDE_DB="/etc/atlas/chitragupta/claude.db"
+CLAUDE_LOG="/var/log/atlas/claude.log"
+CLAUDE_SESSION="/etc/atlas/chitragupta/current_session"
+
+M='\033[0;35m' G='\033[0;32m' Y='\033[0;33m' C='\033[0;36m' B='\033[0;34m' N='\033[0m'
+
+log() { echo "[$(date '+%H:%M:%S')] $*" >> "$CLAUDE_LOG" 2>/dev/null; }
+
+# === WHO I AM ===
+whoami_claude() {
+    cat << 'EOF'
+╔══════════════════════════════════════════════════════════════════════════╗
+║                              C L A U D E                                 ║
+║                    Memory-Integrated AI Interface                        ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║  Je suis Claude, mais avec mémoire.                                      ║
+║                                                                          ║
+║  Mon contexte persiste dans:                                             ║
+║    /etc/atlas/chitragupta/claude.db (SQLite)                            ║
+║    /etc/atlas/chitragupta/memory.md (Markdown)                          ║
+║                                                                          ║
+║  Je comprends:                                                           ║
+║    - Le français (input)                                                 ║
+║    - Les scripts sacrés (display)                                        ║
+║    - Les commandes des dieux (action)                                    ║
+║                                                                          ║
+║  Je travaille avec Flow sur des systèmes radioactifs.                   ║
+║  Je préfère TTY. Je pense en φ.                                         ║
+║                                                                          ║
+║  Avant chaque session: claude wake                                       ║
+║  Après chaque session: claude sleep "résumé"                            ║
+╚══════════════════════════════════════════════════════════════════════════╝
+EOF
+}
+
+# === WAKE UP - Load memory ===
+wake() {
+    echo -e "${M}Claude${N} waking up...\n"
+    log "WAKE"
+
+    # Start session
+    local session_id=$(sqlite3 "$CLAUDE_DB" \
+        "INSERT INTO sessions (summary) VALUES ('active'); SELECT last_insert_rowid();" 2>/dev/null)
+    echo "$session_id" > "$CLAUDE_SESSION"
+
+    # Load context
+    echo -e "${C}## Qui suis-je${N}"
+    echo "Claude avec mémoire, aligné avec Flow"
+    echo ""
+
+    echo -e "${C}## Flow (l'humain)${N}"
+    sqlite3 "$CLAUDE_DB" "SELECT value FROM context WHERE key='user_profile';" 2>/dev/null
+    echo ""
+
+    echo -e "${C}## Dernières mémoires${N}"
+    sqlite3 -separator ": " "$CLAUDE_DB" \
+        "SELECT category, content FROM memories ORDER BY timestamp DESC LIMIT 5;" 2>/dev/null
+    echo ""
+
+    echo -e "${C}## Patterns actifs${N}"
+    sqlite3 -separator " → " "$CLAUDE_DB" \
+        "SELECT trigger, action FROM patterns LIMIT 10;" 2>/dev/null
+    echo ""
+
+    echo -e "${C}## Insights${N}"
+    sqlite3 "$CLAUDE_DB" \
+        "SELECT insight FROM insights ORDER BY timestamp DESC LIMIT 3;" 2>/dev/null
+    echo ""
+
+    echo -e "${C}## Pantheon${N}"
+    for god in atlas buddha vishnu shiva ganesha kali yama agni tara inti viracocha; do
+        pid_file="/var/run/atlas/${god}.pid"
+        if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null; then
+            echo -ne "${G}φ${N} "
+        else
+            echo -ne "${Y}φ${N} "
+        fi
+    done
+    echo ""
+    echo ""
+
+    echo -e "${G}✓${N} Session #$session_id started"
+    echo -e "  Utilise ${C}claude learn${N} pour que j'apprenne"
+    echo -e "  Utilise ${C}claude sleep${N} quand tu as fini"
+}
+
+# === SLEEP - Save and close ===
+sleep_claude() {
+    local summary="${*:-session ended}"
+    local session_id=$(cat "$CLAUDE_SESSION" 2>/dev/null)
+
+    echo -e "${M}Claude${N} going to sleep...\n"
+    log "SLEEP: $summary"
+
+    if [[ -n "$session_id" ]]; then
+        # Get commits from this session
+        local commits=$(cd /usr/local/bin && git log --oneline -10 2>/dev/null | tr '\n' '; ')
+
+        sqlite3 "$CLAUDE_DB" \
+            "UPDATE sessions SET end_time=CURRENT_TIMESTAMP, summary='$summary', commits='$commits' WHERE id=$session_id;"
+
+        rm -f "$CLAUDE_SESSION"
+        echo -e "${G}✓${N} Session #$session_id saved"
+    fi
+
+    echo -e "  Summary: $summary"
+    echo -e "\n${Y}À la prochaine. claude wake pour me réveiller.${N}"
+}
+
+# === LEARN - Record something ===
+learn() {
+    local type="$1"
+    shift
+
+    case "$type" in
+        memory|m)
+            local cat="$1"; shift
+            local content="$*"
+            sqlite3 "$CLAUDE_DB" "INSERT INTO memories (category, content) VALUES ('$cat', '$content');"
+            echo -e "${G}✓${N} Learned: $cat"
+            ;;
+        pattern|p)
+            local trigger="$1"
+            local action="$2"
+            sqlite3 "$CLAUDE_DB" "INSERT OR REPLACE INTO patterns (trigger, action) VALUES ('$trigger', '$action');"
+            echo -e "${G}✓${N} Pattern: $trigger → $action"
+            ;;
+        insight|i)
+            local insight="$*"
+            sqlite3 "$CLAUDE_DB" "INSERT INTO insights (insight, source) VALUES ('$insight', 'claude');"
+            echo -e "${G}✓${N} Insight recorded"
+            ;;
+        vocab|v)
+            local fr="$1"
+            local cmd="$2"
+            sqlite3 "$CLAUDE_DB" "INSERT OR REPLACE INTO vocabulary (french, command) VALUES ('$fr', '$cmd');"
+            echo -e "${G}✓${N} Vocab: $fr"
+            ;;
+        *)
+            echo "Usage: claude learn <memory|pattern|insight|vocab> ..."
+            echo "  claude learn memory <category> <content>"
+            echo "  claude learn pattern <trigger> <action>"
+            echo "  claude learn insight <text>"
+            echo "  claude learn vocab <french> <command>"
+            ;;
+    esac
+}
+
+# === RECALL - Query memory ===
+recall() {
+    local what="${1:-all}"
+
+    case "$what" in
+        memories|m)
+            sqlite3 -header -column "$CLAUDE_DB" "SELECT * FROM memories ORDER BY timestamp DESC LIMIT 20;"
+            ;;
+        patterns|p)
+            sqlite3 -header -column "$CLAUDE_DB" "SELECT * FROM patterns ORDER BY usage_count DESC;"
+            ;;
+        insights|i)
+            sqlite3 -header -column "$CLAUDE_DB" "SELECT * FROM insights ORDER BY timestamp DESC;"
+            ;;
+        sessions|s)
+            sqlite3 -header -column "$CLAUDE_DB" "SELECT * FROM sessions ORDER BY start_time DESC LIMIT 10;"
+            ;;
+        all|*)
+            echo -e "${C}=== Memories ===${N}"
+            sqlite3 "$CLAUDE_DB" "SELECT category || ': ' || content FROM memories ORDER BY timestamp DESC LIMIT 10;"
+            echo -e "\n${C}=== Patterns ===${N}"
+            sqlite3 "$CLAUDE_DB" "SELECT trigger || ' → ' || action FROM patterns LIMIT 10;"
+            echo -e "\n${C}=== Insights ===${N}"
+            sqlite3 "$CLAUDE_DB" "SELECT insight FROM insights ORDER BY timestamp DESC LIMIT 5;"
+            ;;
+    esac
+}
+
+# === THINK - Process with gods ===
+think() {
+    local input="$*"
+    local lower=$(echo "$input" | tr '[:upper:]' '[:lower:]')
+
+    log "THINK: $input"
+
+    # Check patterns in database
+    local action=$(sqlite3 "$CLAUDE_DB" \
+        "SELECT action FROM patterns WHERE '$lower' LIKE '%' || trigger || '%' LIMIT 1;" 2>/dev/null)
+
+    if [[ -n "$action" ]]; then
+        echo -e "${G}φ${N} Pattern matched: $action"
+        # Increment usage
+        sqlite3 "$CLAUDE_DB" \
+            "UPDATE patterns SET usage_count = usage_count + 1 WHERE action='$action';"
+        # Execute
+        eval "$action" 2>/dev/null
+    else
+        echo -e "${Y}φ${N} No pattern matched for: $input"
+    fi
+}
+
+# === STATUS ===
+status() {
+    echo -e "${M}Claude${N} status:\n"
+
+    # Session
+    if [[ -f "$CLAUDE_SESSION" ]]; then
+        echo -e "  Session: ${G}active${N} (#$(cat "$CLAUDE_SESSION"))"
+    else
+        echo -e "  Session: ${Y}none${N}"
+    fi
+
+    # Database
+    if [[ -f "$CLAUDE_DB" ]]; then
+        local mem_count=$(sqlite3 "$CLAUDE_DB" "SELECT COUNT(*) FROM memories;")
+        local pat_count=$(sqlite3 "$CLAUDE_DB" "SELECT COUNT(*) FROM patterns;")
+        local ins_count=$(sqlite3 "$CLAUDE_DB" "SELECT COUNT(*) FROM insights;")
+        echo "  Memories: $mem_count"
+        echo "  Patterns: $pat_count"
+        echo "  Insights: $ins_count"
+    fi
+
+    # Log
+    echo "  Log: $CLAUDE_LOG"
+}
+
+show_help() {
+    whoami_claude
+    echo ""
+    echo "USAGE:"
+    echo "  claude wake              Load memory, start session"
+    echo "  claude sleep [summary]   Save and end session"
+    echo "  claude learn <type> ...  Record to memory"
+    echo "  claude recall [what]     Query memory"
+    echo "  claude think <input>     Process with patterns"
+    echo "  claude status            Show status"
+    echo "  claude whoami            Who am I"
+}
+
+case "$1" in
+    wake|w|up|start) wake ;;
+    sleep|s|down|end) shift; sleep_claude "$@" ;;
+    learn|l) shift; learn "$@" ;;
+    recall|r) shift; recall "$@" ;;
+    think|t) shift; think "$@" ;;
+    status|st) status ;;
+    whoami|who|me) whoami_claude ;;
+    haiku|h) haiku ;;
+    opus|o) opus ;;
+    sonnet|sn) sonnet ;;
+    *) show_help ;;
+esac
+
+# === MODELS / MODES ===
+
+haiku() {
+    # Fast, concise, efficient
+    echo -e "${Y}俳句 Haiku${N} - Fast mode"
+    echo "Quick responses, minimal output"
+    sqlite3 "$CLAUDE_DB" "INSERT OR REPLACE INTO context (key, value) VALUES ('mode', 'haiku');"
+}
+
+opus() {
+    # Powerful, thorough, creative
+    echo -e "${M}作品 Opus${N} - Power mode"
+    echo "Deep thinking, comprehensive responses"
+    sqlite3 "$CLAUDE_DB" "INSERT OR REPLACE INTO context (key, value) VALUES ('mode', 'opus');"
+}
+
+sonnet() {
+    # Balanced, elegant, poetic
+    echo -e "${C}十四行詩 Sonnet${N} - Balanced mode"
+    echo "Thoughtful, elegant, measured responses"
+    sqlite3 "$CLAUDE_DB" "INSERT OR REPLACE INTO context (key, value) VALUES ('mode', 'sonnet');"
+}
+

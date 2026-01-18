@@ -1,0 +1,14 @@
+#!/bin/bash
+# ᚱ - Rune filter
+"$@" 2>&1 | sed '
+s/a/ᚨ/g; s/b/ᛒ/g; s/c/ᚲ/g; s/d/ᛞ/g; s/e/ᛖ/g
+s/f/ᚠ/g; s/g/ᚷ/g; s/h/ᚺ/g; s/i/ᛁ/g; s/j/ᛃ/g
+s/k/ᚲ/g; s/l/ᛚ/g; s/m/ᛗ/g; s/n/ᚾ/g; s/o/ᛟ/g
+s/p/ᛈ/g; s/q/ᚲ/g; s/r/ᚱ/g; s/s/ᛊ/g; s/t/ᛏ/g
+s/u/ᚢ/g; s/v/ᚹ/g; s/w/ᚹ/g; s/x/ᛊ/g; s/y/ᛃ/g; s/z/ᛉ/g
+s/A/ᚨ/g; s/B/ᛒ/g; s/C/ᚲ/g; s/D/ᛞ/g; s/E/ᛖ/g
+s/F/ᚠ/g; s/G/ᚷ/g; s/H/ᚺ/g; s/I/ᛁ/g; s/J/ᛃ/g
+s/K/ᚲ/g; s/L/ᛚ/g; s/M/ᛗ/g; s/N/ᚾ/g; s/O/ᛟ/g
+s/P/ᛈ/g; s/Q/ᚲ/g; s/R/ᚱ/g; s/S/ᛊ/g; s/T/ᛏ/g
+s/U/ᚢ/g; s/V/ᚹ/g; s/W/ᚹ/g; s/X/ᛊ/g; s/Y/ᛃ/g; s/Z/ᛉ/g
+'

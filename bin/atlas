@@ -1,0 +1,245 @@
+#!/bin/bash
+# ATLAS - Application Sandboxing Daemon
+# Isolates userspace from kernel, monitors process security
+
+ATLAS_CONF="/etc/atlas"
+ATLAS_LOG="/var/log/atlas/atlas.log"
+ATLAS_PID="/var/run/atlas/atlas.pid"
+ATLAS_SOCK="/var/run/atlas/atlas.sock"
+
+# Colors
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' N='\033[0m'
+
+log() { echo "[$(date '+%H:%M:%S')] $*" >> "$ATLAS_LOG"; }
+
+# Default sandbox profile using bubblewrap
+sandbox_run() {
+    local cmd="$1"
+    shift
+
+    bwrap \
+        --ro-bind /usr /usr \
+        --ro-bind /bin /bin \
+        --ro-bind /lib /lib \
+        --ro-bind /lib64 /lib64 2>/dev/null \
+        --ro-bind /etc /etc \
+        --ro-bind /opt /opt 2>/dev/null \
+        --symlink usr/lib /lib64 2>/dev/null \
+        --dev /dev \
+        --proc /proc \
+        --tmpfs /tmp \
+        --tmpfs /run \
+        --bind "$HOME" "$HOME" \
+        --unshare-pid \
+        --unshare-net \
+        --unshare-uts \
+        --unshare-ipc \
+        --die-with-parent \
+        --new-session \
+        --seccomp 3 3< <(gen_seccomp) \
+        -- "$cmd" "$@" 2>/dev/null || \
+    # Fallback to firejail if bwrap fails
+    firejail --quiet --private-tmp --noroot --seccomp --caps.drop=all "$cmd" "$@"
+}
+
+# Network-allowed sandbox
+sandbox_net() {
+    local cmd="$1"
+    shift
+
+    firejail --quiet \
+        --private-tmp \
+        --noroot \
+        --seccomp \
+        --caps.drop=all \
+        --nodvd \
+        --nogroups \
+        --nonewprivs \
+        --noroot \
+        "$cmd" "$@"
+}
+
+# Strict sandbox (no network, no home access)
+sandbox_strict() {
+    local cmd="$1"
+    shift
+
+    bwrap \
+        --ro-bind /usr /usr \
+        --ro-bind /bin /bin \
+        --ro-bind /lib /lib \
+        --ro-bind /lib64 /lib64 2>/dev/null \
+        --ro-bind /etc/alternatives /etc/alternatives 2>/dev/null \
+        --ro-bind /etc/ld.so.cache /etc/ld.so.cache \
+        --dev /dev \
+        --proc /proc \
+        --tmpfs /tmp \
+        --tmpfs /home \
+        --unshare-all \
+        --die-with-parent \
+        --new-session \
+        -- "$cmd" "$@"
+}
+
+# Generate basic seccomp filter (block dangerous syscalls)
+gen_seccomp() {
+    # Return empty for now - firejail handles this better
+    echo ""
+}
+
+# Daemon mode - monitor and enforce
+daemon_run() {
+    echo $$ > "$ATLAS_PID"
+    log "Atlas daemon started (PID $$)"
+    echo -e "${G}Atlas${N} daemon active"
+
+    # Create socket for IPC
+    rm -f "$ATLAS_SOCK"
+
+    while true; do
+        # Monitor for suspicious processes
+        # Log high-privilege operations
+        ps aux --no-headers | while read -r line; do
+            user=$(echo "$line" | awk '{print $1}')
+            pid=$(echo "$line" | awk '{print $2}')
+            cmd=$(echo "$line" | awk '{print $11}')
+
+            # Skip kernel threads and atlas itself
+            [[ "$cmd" == "[*" ]] && continue
+            [[ "$pid" == "$$" ]] && continue
+
+            # Check for processes running as root that shouldn't
+            if [[ "$user" == "root" ]]; then
+                # Whitelist essential root processes
+                case "$cmd" in
+                    /sbin/*|/usr/lib/systemd/*|/usr/bin/dbus*|*getty*|*login*|*sshd*|*agetty*) ;;
+                    *atlas*|*journald*|*udevd*|*dbus*|*NetworkManager*|*wpa_supplicant*) ;;
+                    *polkit*|*rtkit*|*accounts-daemon*|*upowerd*|*thermald*) ;;
+                    *)
+                        # Log non-essential root processes
+                        log "NOTICE: root process: $cmd (PID: $pid)"
+                        ;;
+                esac
+            fi
+        done
+
+        sleep 30
+    done
+}
+
+daemon_stop() {
+    if [[ -f "$ATLAS_PID" ]]; then
+        kill "$(cat "$ATLAS_PID")" 2>/dev/null
+        rm -f "$ATLAS_PID" "$ATLAS_SOCK"
+        echo -e "${Y}Atlas${N} daemon stopped"
+    fi
+}
+
+daemon_status() {
+    if [[ -f "$ATLAS_PID" ]] && kill -0 "$(cat "$ATLAS_PID")" 2>/dev/null; then
+        echo -e "${G}●${N} Atlas daemon running (PID: $(cat "$ATLAS_PID"))"
+        echo "  Log: $ATLAS_LOG"
+        echo "  Uptime: $(ps -o etime= -p "$(cat "$ATLAS_PID")" 2>/dev/null | xargs)"
+    else
+        echo -e "${R}●${N} Atlas daemon not running"
+    fi
+}
+
+# List sandboxed processes
+list_sandboxed() {
+    echo -e "${B}Sandboxed processes:${N}"
+    firejail --list 2>/dev/null || echo "  None active"
+    echo ""
+    echo -e "${B}Bubblewrap processes:${N}"
+    pgrep -a bwrap 2>/dev/null || echo "  None active"
+}
+
+# Wrap common apps with sandbox by default
+install_wrappers() {
+    local apps=("chromium" "firefox" "code" "discord" "slack" "telegram-desktop" "vlc" "mpv")
+
+    mkdir -p /usr/local/share/atlas/wrappers
+
+    for app in "${apps[@]}"; do
+        if command -v "$app" &>/dev/null; then
+            real_path=$(which "$app")
+            echo -e "  ${G}✓${N} $app"
+            cat > "/usr/local/share/atlas/wrappers/$app" << WRAP
+#!/bin/bash
+exec firejail --quiet "$real_path" "\$@"
+WRAP
+            chmod +x "/usr/local/share/atlas/wrappers/$app"
+        fi
+    done
+
+    echo ""
+    echo "Add to PATH: export PATH=\"/usr/local/share/atlas/wrappers:\$PATH\""
+}
+
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  ATLAS - Application Sandboxing System                    ║
+╚═══════════════════════════════════════════════════════════╝
+
+USAGE:
+  atlas <command> [args]
+
+COMMANDS:
+  run <cmd>      Run command in sandbox (no network)
+  net <cmd>      Run command in sandbox (with network)
+  strict <cmd>   Run in strict isolation (no home, no net)
+
+  daemon         Start Atlas monitoring daemon
+  stop           Stop daemon
+  status         Show daemon status
+
+  list           List sandboxed processes
+  wrappers       Install sandbox wrappers for common apps
+  log            Show recent log entries
+
+EXAMPLES:
+  atlas run python script.py     # Isolated execution
+  atlas net chromium             # Browser with network
+  atlas strict ./untrusted       # Maximum isolation
+  atlas daemon &                 # Background monitoring
+
+EOF
+}
+
+# Main
+case "$1" in
+    run|r)
+        shift
+        sandbox_run "$@"
+        ;;
+    net|n)
+        shift
+        sandbox_net "$@"
+        ;;
+    strict|s)
+        shift
+        sandbox_strict "$@"
+        ;;
+    daemon|d)
+        daemon_run
+        ;;
+    stop)
+        daemon_stop
+        ;;
+    status|st)
+        daemon_status
+        ;;
+    list|ls)
+        list_sandboxed
+        ;;
+    wrappers|w)
+        install_wrappers
+        ;;
+    log|l)
+        tail -50 "$ATLAS_LOG" 2>/dev/null || echo "No logs yet"
+        ;;
+    *)
+        show_help
+        ;;
+esac

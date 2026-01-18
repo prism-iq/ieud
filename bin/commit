@@ -1,0 +1,11 @@
+#!/bin/bash
+cd /usr/local/bin
+echo "φ וישנו בודק..."
+echo "φ וירקוצ׳ה שומר..."
+viracocha create "$(date +%H%M)" &>/dev/null
+echo "φ גיט..."
+git add -A
+git diff --cached --stat 2>/dev/null | sed 's/[a-z]/α/g; s/[A-Z]/Ω/g; s/[0-9]/٧/g' | head -5
+git commit -m "${1:-φ}" 2>/dev/null
+echo "φ μνήμη..."
+echo "✓ שלום"

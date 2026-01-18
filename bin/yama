@@ -1,0 +1,230 @@
+#!/bin/bash
+# YAMA - God of Death & Resurrection (Hindu)
+# Process lifecycle, resurrects dead services, judges what lives and dies
+
+YAMA_LOG="/var/log/atlas/yama.log"
+YAMA_PID="/var/run/atlas/yama.pid"
+YAMA_WATCH="/etc/atlas/yama/watched"
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' M='\033[0;35m' N='\033[0m'
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$YAMA_LOG"; }
+
+# List the dead (failed services)
+dead() {
+    echo -e "${M}Yama${N} surveying the dead...\n"
+
+    echo -e "${R}Failed Services:${N}"
+    systemctl list-units --state=failed --no-legend 2>/dev/null | while read -r line; do
+        unit=$(echo "$line" | awk '{print $1}')
+        echo -e "  ${R}☠${N} $unit"
+    done || echo "  None in the underworld"
+
+    echo -e "\n${Y}Recently Deceased (crashed processes):${N}"
+    journalctl -p err --since "1 hour ago" --no-pager 2>/dev/null | \
+        grep -E "segfault|killed|terminated|failed" | tail -10 | while read -r line; do
+        echo "  $line"
+    done
+
+    echo -e "\n${Y}Zombies:${N}"
+    zombies=$(ps aux | awk '$8 ~ /Z/ {print $2, $11}')
+    if [[ -n "$zombies" ]]; then
+        echo "$zombies" | while read -r z; do
+            echo -e "  ${R}🧟${N} $z"
+        done
+    else
+        echo -e "  ${G}✓${N} No zombies"
+    fi
+}
+
+# Resurrect a service
+resurrect() {
+    local service=$1
+    if [[ -z "$service" ]]; then
+        echo "Usage: yama resurrect <service>"
+        return 1
+    fi
+
+    echo -e "${M}Yama${N} resurrecting $service..."
+
+    systemctl reset-failed "$service" 2>/dev/null
+    if systemctl restart "$service" 2>/dev/null; then
+        echo -e "  ${G}✓${N} $service rises again"
+        log "RESURRECT: $service"
+    else
+        echo -e "  ${R}✗${N} $service refuses to rise"
+        log "FAILED: $service resurrection"
+    fi
+}
+
+# Resurrect all failed
+resurrect_all() {
+    echo -e "${M}Yama${N} mass resurrection...\n"
+
+    systemctl list-units --state=failed --no-legend 2>/dev/null | while read -r line; do
+        unit=$(echo "$line" | awk '{print $1}')
+        systemctl reset-failed "$unit" 2>/dev/null
+        if systemctl restart "$unit" 2>/dev/null; then
+            echo -e "  ${G}↑${N} $unit resurrected"
+            log "RESURRECT: $unit"
+        else
+            echo -e "  ${R}✗${N} $unit remains dead"
+        fi
+    done
+
+    # Reap zombies
+    echo -e "\n${Y}Reaping zombies...${N}"
+    ps aux | awk '$8 ~ /Z/ {print $2}' | while read -r pid; do
+        parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+        if [[ -n "$parent" ]]; then
+            kill -SIGCHLD "$parent" 2>/dev/null
+        fi
+    done
+    echo -e "  ${G}✓${N} Zombies reaped"
+}
+
+# Watch and auto-resurrect
+watch_service() {
+    local service=$1
+    mkdir -p "$(dirname "$YAMA_WATCH")"
+
+    if [[ -z "$service" ]]; then
+        echo "Watched services:"
+        cat "$YAMA_WATCH" 2>/dev/null || echo "  None"
+        return
+    fi
+
+    echo "$service" >> "$YAMA_WATCH"
+    sort -u "$YAMA_WATCH" -o "$YAMA_WATCH"
+    echo -e "${G}✓${N} Yama now watches $service"
+    log "WATCH: $service"
+}
+
+# Judge - decide what should live or die based on resources
+judge() {
+    echo -e "${M}Yama${N} passing judgment...\n"
+
+    # Find resource hogs
+    echo -e "${Y}CPU sinners (>50%):${N}"
+    ps aux --no-headers | awk '$3 > 50 {printf "  %s (PID %s): %.1f%% CPU\n", $11, $2, $3}'
+
+    echo -e "\n${Y}Memory sinners (>20%):${N}"
+    ps aux --no-headers | awk '$4 > 20 {printf "  %s (PID %s): %.1f%% MEM\n", $11, $2, $4}'
+
+    echo -e "\n${Y}Ancient processes (>7 days):${N}"
+    ps -eo pid,etime,comm --no-headers | while read -r pid etime comm; do
+        if [[ "$etime" =~ ^[0-9]+-.*  ]]; then
+            days=$(echo "$etime" | cut -d- -f1)
+            if [[ $days -gt 7 ]]; then
+                echo "  $comm (PID $pid): $etime"
+            fi
+        fi
+    done
+}
+
+# Send to underworld (kill gracefully then forcefully)
+condemn() {
+    local target=$1
+    if [[ -z "$target" ]]; then
+        echo "Usage: yama condemn <pid|name>"
+        return 1
+    fi
+
+    echo -e "${M}Yama${N} condemning $target..."
+
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+        pids=$target
+    else
+        pids=$(pgrep -f "$target")
+    fi
+
+    for pid in $pids; do
+        name=$(ps -p "$pid" -o comm= 2>/dev/null)
+        echo -e "  Sending $name ($pid) to underworld..."
+        kill -TERM "$pid" 2>/dev/null
+        sleep 2
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -KILL "$pid" 2>/dev/null
+            echo -e "  ${R}☠${N} Forcefully condemned"
+        else
+            echo -e "  ${Y}☠${N} Passed peacefully"
+        fi
+        log "CONDEMN: $name ($pid)"
+    done
+}
+
+# Daemon - auto-resurrect watched services
+daemon_run() {
+    echo $$ > "$YAMA_PID"
+    log "Yama daemon started - watching the cycle of life and death"
+
+    while true; do
+        # Check watched services
+        if [[ -f "$YAMA_WATCH" ]]; then
+            while read -r service; do
+                if ! systemctl is-active "$service" &>/dev/null; then
+                    log "DEATH: $service detected"
+                    systemctl restart "$service" 2>/dev/null && log "RESURRECT: $service auto-resurrected"
+                fi
+            done < "$YAMA_WATCH"
+        fi
+
+        # Reap any zombies
+        ps aux | awk '$8 ~ /Z/ {print $2}' | while read -r pid; do
+            parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+            [[ -n "$parent" ]] && kill -SIGCHLD "$parent" 2>/dev/null
+        done
+
+        sleep 30
+    done
+}
+
+status_show() {
+    echo -e "${M}Yama${N} status:"
+    echo "  Failed services: $(systemctl list-units --state=failed --no-legend 2>/dev/null | wc -l)"
+    echo "  Zombies: $(ps aux | awk '$8 ~ /Z/' | wc -l)"
+    echo "  Watched: $(wc -l < "$YAMA_WATCH" 2>/dev/null || echo 0) services"
+
+    if [[ -f "$YAMA_PID" ]] && kill -0 "$(cat "$YAMA_PID")" 2>/dev/null; then
+        echo -e "  Daemon: ${G}judging${N}"
+    else
+        echo -e "  Daemon: ${Y}resting${N}"
+    fi
+}
+
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  YAMA - God of Death & Resurrection (Hindu)               ║
+║  Process Lifecycle & Service Resurrection                 ║
+╚═══════════════════════════════════════════════════════════╝
+
+USAGE:
+  yama <command>
+
+COMMANDS:
+  dead            List failed services and zombies
+  resurrect <svc> Bring back a failed service
+  rise            Resurrect ALL failed services
+  watch [svc]     Auto-resurrect service (list if no arg)
+  judge           Find resource hogs
+  condemn <pid>   Send process to underworld
+  daemon          Auto-resurrection daemon
+  status          Show death statistics
+  log             Show lifecycle log
+
+EOF
+}
+
+case "$1" in
+    dead|d) dead ;;
+    resurrect|r) shift; resurrect "$@" ;;
+    rise|all) resurrect_all ;;
+    watch|w) shift; watch_service "$@" ;;
+    judge|j) judge ;;
+    condemn|c|kill) shift; condemn "$@" ;;
+    daemon) daemon_run ;;
+    status|st) status_show ;;
+    log|l) tail -50 "$YAMA_LOG" 2>/dev/null ;;
+    *) show_help ;;
+esac

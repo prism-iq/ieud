@@ -1,0 +1,70 @@
+#!/bin/bash
+# INTI - Sun God (Incan/Peru)
+# System monitoring, illuminates everything, metrics collection
+
+INTI_LOG="/var/log/atlas/inti.log"
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' O='\033[38;5;214m' N='\033[0m'
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$INTI_LOG"; }
+
+illuminate() {
+    echo -e "${O}☀ Inti${N} illuminating system...\n"
+
+    # System overview
+    echo -e "${Y}═══ System ═══${N}"
+    echo "  Hostname: $(hostname)"
+    echo "  Kernel: $(uname -r)"
+    echo "  Uptime: $(uptime -p)"
+    echo "  Load: $(cat /proc/loadavg | cut -d' ' -f1-3)"
+
+    # Resources
+    echo -e "\n${Y}═══ Resources ═══${N}"
+    echo "  CPU: $(grep -c ^processor /proc/cpuinfo) cores"
+    mem=$(free -h | awk '/^Mem:/ {print $3 "/" $2}')
+    echo "  Memory: $mem"
+    disk=$(df -h / | awk 'NR==2 {print $3 "/" $2 " (" $5 ")"}')
+    echo "  Disk /: $disk"
+
+    # Top processes
+    echo -e "\n${Y}═══ Top Processes ═══${N}"
+    ps aux --sort=-%cpu | head -6 | tail -5 | awk '{printf "  %-8s %5s%% %s\n", $1, $3, $11}'
+
+    # Services
+    echo -e "\n${Y}═══ Services ═══${N}"
+    echo "  Running: $(systemctl list-units --state=running --no-legend 2>/dev/null | wc -l)"
+    echo "  Failed: $(systemctl list-units --state=failed --no-legend 2>/dev/null | wc -l)"
+
+    # Network
+    echo -e "\n${Y}═══ Network ═══${N}"
+    echo "  Connections: $(ss -s | grep estab | grep -oP '\d+(?= estab)')"
+    ip -br addr | grep -v "^lo" | while read -r line; do
+        echo "  $line"
+    done
+
+    # Security gods status
+    echo -e "\n${Y}═══ Pantheon ═══${N}"
+    for god in atlas buddha vishnu shiva ganesha kali indra; do
+        pid_file="/var/run/atlas/${god}.pid"
+        if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null; then
+            echo -e "  ${G}●${N} $god"
+        else
+            echo -e "  ${Y}○${N} $god"
+        fi
+    done
+}
+
+watch_system() {
+    echo -e "${O}☀ Inti${N} watching (Ctrl+C to stop)...\n"
+    while true; do
+        clear
+        illuminate
+        sleep 5
+    done
+}
+
+case "$1" in
+    illuminate|i|"") illuminate ;;
+    watch|w) watch_system ;;
+    *) echo "Usage: inti [illuminate|watch]" ;;
+esac

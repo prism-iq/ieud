@@ -1,0 +1,97 @@
+#!/bin/bash
+# CLES - Keyboard Layout Guardian
+# Locks AZERTY, prevents unwanted changes
+
+CLES_LAYOUT="fr"
+CLES_LOG="/var/log/atlas/cles.log"
+
+G='\033[0;32m' Y='\033[0;33m' R='\033[0;31m' C='\033[0;36m' N='\033[0m'
+
+log() { echo "[$(date '+%H:%M:%S')] $*" >> "$CLES_LOG" 2>/dev/null; }
+
+# Lock layout everywhere
+lock() {
+    echo -e "${C}⌨ Clés${N} locking AZERTY...\n"
+
+    # TTY/Console
+    echo "KEYMAP=$CLES_LAYOUT" > /etc/vconsole.conf
+    loadkeys $CLES_LAYOUT 2>/dev/null
+    echo -e "  ${G}✓${N} TTY: $CLES_LAYOUT"
+
+    # X11
+    localectl set-x11-keymap $CLES_LAYOUT pc105 2>/dev/null
+    echo -e "  ${G}✓${N} X11: $CLES_LAYOUT"
+
+    # Current session (X11)
+    setxkbmap $CLES_LAYOUT 2>/dev/null && echo -e "  ${G}✓${N} Current X session"
+
+    # Prevent gsettings changes (GNOME)
+    if command -v gsettings &>/dev/null; then
+        gsettings set org.gnome.desktop.input-sources sources "[('xkb', '$CLES_LAYOUT')]" 2>/dev/null
+    fi
+
+    log "Layout locked to $CLES_LAYOUT"
+    echo -e "\n${G}AZERTY verrouillé${N}"
+}
+
+# Check current layout
+status() {
+    echo -e "${C}⌨ Clés${N} status:\n"
+
+    echo "  TTY:     $(grep KEYMAP /etc/vconsole.conf 2>/dev/null | cut -d= -f2)"
+    echo "  X11:     $(localectl status | grep 'X11 Layout' | awk '{print $3}')"
+
+    # Current active
+    if command -v xkb-switch &>/dev/null; then
+        echo "  Active:  $(xkb-switch -p 2>/dev/null)"
+    elif command -v setxkbmap &>/dev/null; then
+        echo "  Active:  $(setxkbmap -query 2>/dev/null | grep layout | awk '{print $2}')"
+    fi
+}
+
+# Daemon - watch and enforce
+daemon() {
+    echo -e "${C}⌨ Clés${N} watching keyboard..."
+    log "Daemon started"
+
+    while true; do
+        # Check if layout changed
+        current=$(setxkbmap -query 2>/dev/null | grep layout | awk '{print $2}')
+        if [[ -n "$current" && "$current" != "$CLES_LAYOUT" ]]; then
+            log "Layout changed to $current - reverting"
+            setxkbmap $CLES_LAYOUT 2>/dev/null
+            echo -e "  ${Y}!${N} Reverted $current → $CLES_LAYOUT"
+        fi
+        sleep 5
+    done
+}
+
+# Show AZERTY layout
+show_layout() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════════════════╗
+║  AZERTY Layout (fr)                                                   ║
+╠═══════════════════════════════════════════════════════════════════════╣
+║                                                                       ║
+║  ² │ & │ é │ " │ ' │ ( │ - │ è │ _ │ ç │ à │ ) │ = │ ←──             ║
+║    │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │ 8 │ 9 │ 0 │ ° │ + │                 ║
+║  ──┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───              ║
+║  ↹ │ A │ Z │ E │ R │ T │ Y │ U │ I │ O │ P │ ^ │ $ │                 ║
+║    │ a │ z │ e │ r │ t │ y │ u │ i │ o │ p │ ¨ │ £ │ ↵               ║
+║  ──┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───              ║
+║  ⇪ │ Q │ S │ D │ F │ G │ H │ J │ K │ L │ M │ % │ µ │                 ║
+║    │ q │ s │ d │ f │ g │ h │ j │ k │ l │ m │ ù │ * │                 ║
+║  ──┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───              ║
+║  ⇧ │ > │ W │ X │ C │ V │ B │ N │ ? │ . │ / │ § │      ⇧             ║
+║    │ < │ w │ x │ c │ v │ b │ n │ , │ ; │ : │ ! │                     ║
+╚═══════════════════════════════════════════════════════════════════════╝
+EOF
+}
+
+case "$1" in
+    lock|l|"") lock ;;
+    status|s) status ;;
+    daemon|d) daemon ;;
+    show) show_layout ;;
+    *) echo "Usage: cles [lock|status|daemon|show]" ;;
+esac

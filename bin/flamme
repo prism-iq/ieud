@@ -1,0 +1,263 @@
+#!/bin/bash
+# FLAMME 🔥 - C++ Worker Launcher
+# Agni compile, Shiva tue
+
+FLAMME_DIR="/etc/atlas/flamme"
+FLAMME_WORKERS="$FLAMME_DIR/workers"
+FLAMME_BUILD="/tmp/flamme_build"
+FLAMME_RUN="/var/run/atlas/flamme"
+FLAMME_LOG="/var/log/atlas/flamme.log"
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' O='\033[38;5;208m' N='\033[0m'
+
+log() { echo "[$(date '+%H:%M:%S')] $*" >> "$FLAMME_LOG"; }
+
+# Compile un worker C++
+ignite() {
+    local name="$1"
+    local source="$2"
+
+    mkdir -p "$FLAMME_BUILD" "$FLAMME_WORKERS"
+
+    if [[ -z "$source" ]]; then
+        source="$FLAMME_DIR/sources/${name}.cpp"
+    fi
+
+    if [[ ! -f "$source" ]]; then
+        echo -e "${R}✗${N} Source not found: $source"
+        return 1
+    fi
+
+    echo -e "${O}🔥 Flamme${N} compiling $name..."
+
+    # Inject worker code into template
+    local template="$FLAMME_DIR/worker_template.cpp"
+    local build_file="$FLAMME_BUILD/${name}.cpp"
+    local worker_code=$(cat "$source")
+
+    # Create full source
+    cat > "$build_file" << CPPEOF
+#include <iostream>
+#include <string>
+#include <csignal>
+#include <unistd.h>
+#include <fstream>
+#include <ctime>
+#include <cstring>
+#include <vector>
+#include <thread>
+#include <atomic>
+
+volatile sig_atomic_t running = 1;
+std::string worker_name;
+std::string log_path = "/var/log/atlas/flamme.log";
+
+void log_msg(const std::string& msg) {
+    std::ofstream log(log_path, std::ios::app);
+    time_t now = time(0);
+    char* dt = ctime(&now);
+    dt[strlen(dt)-1] = '\\0';
+    log << "[" << dt << "] " << worker_name << ": " << msg << std::endl;
+}
+
+void shiva_handler(int sig) {
+    log_msg("☠ Shiva struck");
+    running = 0;
+}
+
+// Worker code
+$worker_code
+
+int main(int argc, char* argv[]) {
+    worker_name = argc > 1 ? argv[1] : "$name";
+
+    signal(SIGTERM, shiva_handler);
+    signal(SIGINT, shiva_handler);
+    signal(SIGUSR1, shiva_handler);
+
+    log_msg("🔥 Ignited");
+
+    std::string pid_file = "/var/run/atlas/flamme/" + worker_name + ".pid";
+    std::ofstream pf(pid_file);
+    pf << getpid();
+    pf.close();
+
+    while (running) {
+        worker_loop();
+        usleep(100000);
+    }
+
+    log_msg("Extinguished");
+    unlink(pid_file.c_str());
+    return 0;
+}
+CPPEOF
+
+    # Compile
+    if g++ -O2 -std=c++17 -pthread "$build_file" -o "$FLAMME_WORKERS/$name" 2>&1; then
+        echo -e "${G}✓${N} Compiled: $FLAMME_WORKERS/$name"
+        log "COMPILED: $name"
+        return 0
+    else
+        echo -e "${R}✗${N} Compilation failed"
+        return 1
+    fi
+}
+
+# Lance un worker
+launch() {
+    local name="$1"
+    shift
+    local worker="$FLAMME_WORKERS/$name"
+
+    if [[ ! -x "$worker" ]]; then
+        echo -e "${R}✗${N} Worker not found: $name"
+        echo "  Run: flamme ignite $name <source.cpp>"
+        return 1
+    fi
+
+    echo -e "${O}🔥 Flamme${N} launching $name..."
+    "$worker" "$name" "$@" &
+    local pid=$!
+    echo "$pid" > "$FLAMME_RUN/${name}.pid"
+    echo -e "${G}✓${N} $name running (PID: $pid)"
+    log "LAUNCHED: $name (PID: $pid)"
+}
+
+# Shiva tue un worker
+kill_worker() {
+    local name="$1"
+    local pid_file="$FLAMME_RUN/${name}.pid"
+
+    if [[ -f "$pid_file" ]]; then
+        local pid=$(cat "$pid_file")
+        echo -e "${R}☠ Shiva${N} killing $name (PID: $pid)..."
+        kill -SIGUSR1 "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
+        rm -f "$pid_file"
+        log "KILLED: $name (PID: $pid)"
+        echo -e "${G}✓${N} $name destroyed"
+    else
+        echo -e "${Y}?${N} Worker not running: $name"
+    fi
+}
+
+# Liste les workers
+list_workers() {
+    echo -e "${O}🔥 Flamme${N} workers:\n"
+
+    echo -e "${Y}Compiled:${N}"
+    for w in "$FLAMME_WORKERS"/*; do
+        [[ -x "$w" ]] && echo "  φ $(basename "$w")"
+    done 2>/dev/null || echo "  (none)"
+
+    echo -e "\n${Y}Running:${N}"
+    for p in "$FLAMME_RUN"/*.pid; do
+        if [[ -f "$p" ]]; then
+            name=$(basename "$p" .pid)
+            pid=$(cat "$p")
+            if kill -0 "$pid" 2>/dev/null; then
+                echo -e "  ${G}φ${N} $name (PID: $pid)"
+            else
+                echo -e "  ${R}φ${N} $name (dead)"
+                rm -f "$p"
+            fi
+        fi
+    done 2>/dev/null || echo "  (none)"
+}
+
+# Tue tous les workers (Shiva rage)
+purge_all() {
+    echo -e "${R}☠ Shiva${N} purging all workers..."
+    for p in "$FLAMME_RUN"/*.pid; do
+        [[ -f "$p" ]] && kill_worker "$(basename "$p" .pid)"
+    done
+    echo -e "${G}✓${N} All workers destroyed"
+}
+
+# Crée un exemple de worker
+create_example() {
+    mkdir -p "$FLAMME_DIR/sources"
+
+    cat > "$FLAMME_DIR/sources/guardian.cpp" << 'GUARDIANEOF'
+// Guardian Worker - Watches for threats
+#include <dirent.h>
+#include <sys/stat.h>
+
+void worker_loop() {
+    // Check /tmp for suspicious files
+    DIR* dir = opendir("/tmp");
+    if (dir) {
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != NULL) {
+            std::string name = entry->d_name;
+            // Flag hidden executables
+            if (name[0] == '.' && name.length() > 1) {
+                std::string path = "/tmp/" + name;
+                struct stat st;
+                if (stat(path.c_str(), &st) == 0 && (st.st_mode & S_IXUSR)) {
+                    log_msg("⚠ Suspicious: " + path);
+                }
+            }
+        }
+        closedir(dir);
+    }
+}
+GUARDIANEOF
+
+    cat > "$FLAMME_DIR/sources/heartbeat.cpp" << 'HEARTEOF'
+// Heartbeat Worker - System pulse
+#include <fstream>
+
+void worker_loop() {
+    // Just log that we're alive
+    static int count = 0;
+    if (++count % 100 == 0) { // Every 10 seconds
+        log_msg("💓 alive");
+    }
+}
+HEARTEOF
+
+    echo -e "${G}✓${N} Created example workers:"
+    echo "  $FLAMME_DIR/sources/guardian.cpp"
+    echo "  $FLAMME_DIR/sources/heartbeat.cpp"
+    echo ""
+    echo "Compile with: flamme ignite guardian"
+}
+
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  FLAMME 🔥 - C++ Worker Launcher                          ║
+║  Agni compile, Shiva tue                                  ║
+╚═══════════════════════════════════════════════════════════╝
+
+USAGE:
+  flamme ignite <name> [source.cpp]   Compile worker
+  flamme launch <name>                Launch worker
+  flamme kill <name>                  Shiva kills worker
+  flamme purge                        Kill all workers
+  flamme list                         List workers
+  flamme example                      Create example workers
+  flamme log                          Show worker logs
+
+WORKFLOW:
+  1. Write worker code (just worker_loop function)
+  2. flamme ignite myworker code.cpp
+  3. flamme launch myworker
+  4. flamme kill myworker (when Shiva says so)
+
+EOF
+}
+
+mkdir -p "$FLAMME_DIR/sources" "$FLAMME_WORKERS" "$FLAMME_RUN"
+
+case "$1" in
+    ignite|compile|i) shift; ignite "$@" ;;
+    launch|run|l) shift; launch "$@" ;;
+    kill|k) shift; kill_worker "$@" ;;
+    purge|p) purge_all ;;
+    list|ls) list_workers ;;
+    example|ex) create_example ;;
+    log) tail -50 "$FLAMME_LOG" ;;
+    *) show_help ;;
+esac

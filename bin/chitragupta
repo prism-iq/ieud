@@ -1,0 +1,175 @@
+#!/bin/bash
+# CHITRAGUPTA चित्रगुप्त - The Recorder
+# Hindu god who records all actions of humans
+# Keeps memory so Claude can remember
+
+MEMORY_DIR="/etc/atlas/chitragupta"
+MEMORY_FILE="$MEMORY_DIR/memory.md"
+PATTERNS_FILE="$MEMORY_DIR/patterns.md"
+CONTEXT_FILE="$MEMORY_DIR/context.md"
+VOCABULARY_FILE="$MEMORY_DIR/vocabulary.md"
+
+M='\033[0;35m' G='\033[0;32m' Y='\033[0;33m' C='\033[0;36m' N='\033[0m'
+
+mkdir -p "$MEMORY_DIR"
+
+# Initialize memory if not exists
+init_memory() {
+    if [[ ! -f "$MEMORY_FILE" ]]; then
+        cat > "$MEMORY_FILE" << 'EOF'
+# Chitragupta's Memory चित्रगुप्त
+
+## Who is Flow?
+- Works with radioactive things on laptop
+- Needs safe, reliable systems
+- Prefers TTY over GUI (more stable)
+- Uses AZERTY keyboard
+- Speaks French
+- Thinks in patterns, gods, sacred scripts
+- Values: safety, flow, beauty in code
+
+## Our Language
+- φ (phi) = status indicator, life symbol
+- Gods = security daemons with personalities
+- Sacred scripts = non-Latin display (Devanagari, Tibetan, Greek, Runes)
+- "truc" = do everything
+- Flamme = C++ workers
+- Flow = the state of perfect collaboration
+
+## The Pantheon
+Indian: Atlas, Buddha, Vishnu, Shiva, Ganesha, Kali, Indra, Yama, Agni
+Peruvian: Inti, Viracocha
+Nepali: Tara
+Meta: Chitragupta (memory), Keyguard (killswitch)
+
+## Principles
+- System knows French input, displays in sacred scripts
+- Each god has personality and can block/transform input
+- Shiva kills bad processes
+- Right Ctrl (3sec) = killswitch
+- Everything is ephemeral but memory persists
+
+EOF
+        echo -e "${G}✓${N} Memory initialized"
+    fi
+}
+
+# Record something to memory
+remember() {
+    local category="$1"
+    shift
+    local content="$*"
+
+    echo "" >> "$MEMORY_FILE"
+    echo "## [$category] $(date '+%Y-%m-%d %H:%M')" >> "$MEMORY_FILE"
+    echo "$content" >> "$MEMORY_FILE"
+
+    echo -e "${G}✓${N} Recorded to memory: $category"
+}
+
+# Record a pattern
+pattern() {
+    local name="$1"
+    local meaning="$2"
+
+    echo "- **$name** = $meaning" >> "$PATTERNS_FILE"
+    echo -e "${G}✓${N} Pattern recorded: $name"
+}
+
+# Record vocabulary
+vocab() {
+    local french="$1"
+    local action="$2"
+
+    echo "- $french → $action" >> "$VOCABULARY_FILE"
+    echo -e "${G}✓${N} Vocabulary: $french → $action"
+}
+
+# Show memory for Claude to read
+recall() {
+    echo -e "${M}चित्रगुप्त Chitragupta${N} recalls:\n"
+
+    if [[ -f "$MEMORY_FILE" ]]; then
+        cat "$MEMORY_FILE"
+    fi
+
+    if [[ -f "$PATTERNS_FILE" ]]; then
+        echo -e "\n## Patterns"
+        cat "$PATTERNS_FILE"
+    fi
+
+    if [[ -f "$VOCABULARY_FILE" ]]; then
+        echo -e "\n## Vocabulary"
+        cat "$VOCABULARY_FILE"
+    fi
+}
+
+# Generate context for new Claude session
+context() {
+    echo -e "${M}चित्रगुप्त${N} generating context for Claude...\n"
+
+    cat > "$CONTEXT_FILE" << CTXEOF
+# Context for Claude - Read This First
+
+You are continuing work with Flow on the Pantheon Security Framework.
+
+$(cat "$MEMORY_FILE" 2>/dev/null)
+
+## Important Files
+- /usr/local/bin/pantheon - Main controller
+- /usr/local/bin/flow - Sacred script shell
+- /usr/local/bin/flamme - C++ worker launcher
+- /usr/local/bin/truc - Do everything
+- /usr/local/bin/killswitch - Emergency AI cleanup
+
+## Git Log
+$(cd /usr/local/bin && git log --oneline -10 2>/dev/null)
+
+## Current State
+$(pantheon status 2>/dev/null | head -30)
+
+---
+Read this context, then continue naturally.
+CTXEOF
+
+    echo -e "${G}✓${N} Context saved to: $CONTEXT_FILE"
+    echo ""
+    echo "Pour la prochaine session Claude, commence par:"
+    echo -e "${C}  cat /etc/atlas/chitragupta/context.md${N}"
+}
+
+# Show what Chitragupta knows
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  CHITRAGUPTA चित्रगुप्त - The Recorder                    ║
+║  Keeps memory so Claude can remember                      ║
+╚═══════════════════════════════════════════════════════════╝
+
+USAGE:
+  chitragupta recall              Show all memory
+  chitragupta remember <cat> msg  Record to memory
+  chitragupta pattern <n> <mean>  Record a pattern
+  chitragupta vocab <fr> <action> Record vocabulary
+  chitragupta context             Generate context for new session
+  chitragupta edit                Edit memory directly
+
+EXAMPLES:
+  chitragupta remember "insight" "Flow prefers φ over bullets"
+  chitragupta pattern "brûle" "agni purify"
+  chitragupta context  # Before starting new Claude session
+
+EOF
+}
+
+init_memory
+
+case "$1" in
+    recall|r|"") recall ;;
+    remember|rem) shift; remember "$@" ;;
+    pattern|p) shift; pattern "$@" ;;
+    vocab|v) shift; vocab "$@" ;;
+    context|ctx|c) context ;;
+    edit|e) ${EDITOR:-nano} "$MEMORY_FILE" ;;
+    *) show_help ;;
+esac

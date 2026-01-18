@@ -1,0 +1,4 @@
+- **tue** = shiva hunt
+- **guéris** = tara heal
+- **purifie** = agni purify
+- **ressuscite** = yama rise

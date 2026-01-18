@@ -1,0 +1,76 @@
+#!/bin/bash
+# VIRACOCHA - Creator God (Incan/Peru)
+# Backup, snapshots, system restoration
+
+VIRACOCHA_DIR="/var/backups/viracocha"
+VIRACOCHA_LOG="/var/log/atlas/viracocha.log"
+
+G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' C='\033[0;36m' N='\033[0m'
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$VIRACOCHA_LOG"; }
+
+create() {
+    local name=${1:-"snapshot-$(date +%Y%m%d-%H%M%S)"}
+    mkdir -p "$VIRACOCHA_DIR/$name"
+
+    echo -e "${C}Viracocha${N} creating snapshot: $name"
+
+    # Critical configs
+    tar -czf "$VIRACOCHA_DIR/$name/etc.tar.gz" /etc 2>/dev/null
+    echo -e "  ${G}✓${N} /etc"
+
+    # Package list
+    pacman -Qqe > "$VIRACOCHA_DIR/$name/packages.txt" 2>/dev/null
+    echo -e "  ${G}✓${N} package list"
+
+    # Service states
+    systemctl list-unit-files > "$VIRACOCHA_DIR/$name/services.txt" 2>/dev/null
+    echo -e "  ${G}✓${N} services"
+
+    # User configs
+    tar -czf "$VIRACOCHA_DIR/$name/home-configs.tar.gz" \
+        /root/.bashrc /root/.profile /root/.ssh \
+        /home/*/.bashrc /home/*/.profile /home/*/.ssh 2>/dev/null
+    echo -e "  ${G}✓${N} user configs"
+
+    log "Snapshot created: $name"
+    echo -e "\n${G}Snapshot complete:${N} $VIRACOCHA_DIR/$name"
+}
+
+list() {
+    echo -e "${C}Viracocha${N} snapshots:\n"
+    ls -lt "$VIRACOCHA_DIR" 2>/dev/null | tail -n +2 | while read -r line; do
+        echo "  $line"
+    done
+}
+
+restore() {
+    local name=$1
+    if [[ -z "$name" ]]; then
+        echo "Usage: viracocha restore <snapshot-name>"
+        list
+        return 1
+    fi
+
+    if [[ ! -d "$VIRACOCHA_DIR/$name" ]]; then
+        echo "Snapshot not found: $name"
+        return 1
+    fi
+
+    echo -e "${Y}Viracocha${N} restoring: $name"
+    echo "This will overwrite current configs. Continue? [y/N]"
+    read -r confirm
+    [[ "$confirm" != "y" ]] && return
+
+    tar -xzf "$VIRACOCHA_DIR/$name/etc.tar.gz" -C / 2>/dev/null
+    echo -e "  ${G}✓${N} /etc restored"
+
+    log "Restored from: $name"
+}
+
+case "$1" in
+    create|c) shift; create "$@" ;;
+    list|ls|l) list ;;
+    restore|r) shift; restore "$@" ;;
+    *) echo "Usage: viracocha [create|list|restore] [name]" ;;
+esac

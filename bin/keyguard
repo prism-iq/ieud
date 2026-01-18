@@ -1,0 +1,97 @@
+#!/bin/bash
+# KEYGUARD - Keyboard Emergency Daemon
+# Monitors for Right Ctrl (alone, held 3 sec) = killswitch trigger
+
+KEYGUARD_PID="/var/run/atlas/keyguard.pid"
+KEYGUARD_LOG="/var/log/atlas/keyguard.log"
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' N='\033[0m'
+
+log() { echo "[$(date '+%H:%M:%S')] $*" >> "$KEYGUARD_LOG" 2>/dev/null; }
+
+# Find keyboard device
+find_kbd() {
+    for dev in /dev/input/event*; do
+        if udevadm info "$dev" 2>/dev/null | grep -qi keyboard; then
+            echo "$dev"
+            return
+        fi
+    done
+    # Fallback
+    echo "/dev/input/event0"
+}
+
+daemon_run() {
+    echo $$ > "$KEYGUARD_PID"
+    log "Keyguard started"
+    echo -e "${G}φ${N} Keyguard active - Right Ctrl (3sec) = killswitch"
+
+    KBD=$(find_kbd)
+    RCTRL_DOWN=0
+    RCTRL_TIME=0
+
+    # Use evtest if available, otherwise showkey
+    if command -v evtest &>/dev/null; then
+        evtest "$KBD" 2>/dev/null | while read -r line; do
+            # Right Ctrl key code is 97
+            if echo "$line" | grep -q "KEY_RIGHTCTRL.*value 1"; then
+                RCTRL_TIME=$(date +%s)
+                log "Right Ctrl pressed"
+            elif echo "$line" | grep -q "KEY_RIGHTCTRL.*value 0"; then
+                if [[ $RCTRL_TIME -gt 0 ]]; then
+                    held=$(($(date +%s) - RCTRL_TIME))
+                    if [[ $held -ge 3 ]]; then
+                        log "KILLSWITCH TRIGGERED (held ${held}s)"
+                        echo -e "\n${R}⚠️  KILLSWITCH TRIGGERED ⚠️${N}"
+                        killswitch --confirm
+                    fi
+                fi
+                RCTRL_TIME=0
+            fi
+        done
+    else
+        echo "evtest not installed. Install with: pacman -S evtest"
+        exit 1
+    fi
+}
+
+stop_daemon() {
+    if [[ -f "$KEYGUARD_PID" ]]; then
+        kill "$(cat "$KEYGUARD_PID")" 2>/dev/null
+        rm -f "$KEYGUARD_PID"
+        echo -e "${Y}φ${N} Keyguard stopped"
+    fi
+}
+
+status_show() {
+    echo -e "${Y}φ${N} Keyguard status:"
+    if [[ -f "$KEYGUARD_PID" ]] && kill -0 "$(cat "$KEYGUARD_PID")" 2>/dev/null; then
+        echo -e "  ${G}φ${N} active"
+    else
+        echo -e "  ${Y}φ${N} inactive"
+    fi
+    echo "  Trigger: Hold Right Ctrl for 3 seconds"
+}
+
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  KEYGUARD - Keyboard Emergency Daemon                     ║
+╠═══════════════════════════════════════════════════════════╣
+║  Hold RIGHT CTRL for 3 seconds = KILLSWITCH               ║
+╚═══════════════════════════════════════════════════════════╝
+
+USAGE:
+  keyguard daemon    Start monitoring (needs root)
+  keyguard stop      Stop monitoring
+  keyguard status    Show status
+
+EOF
+}
+
+case "$1" in
+    daemon|d) daemon_run ;;
+    stop|s) stop_daemon ;;
+    status|st) status_show ;;
+    *) show_help ;;
+esac

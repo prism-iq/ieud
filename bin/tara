@@ -1,0 +1,88 @@
+#!/bin/bash
+# TARA - Compassionate Protector (Nepali/Tibetan)
+# System recovery, healing, repair
+
+TARA_LOG="/var/log/atlas/tara.log"
+
+G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' M='\033[0;35m' N='\033[0m'
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$TARA_LOG"; }
+
+heal() {
+    echo -e "${M}Tara${N} healing system...\n"
+
+    # Fix package database
+    echo -e "${Y}Package system:${N}"
+    if pacman -Dk 2>&1 | grep -q "error"; then
+        echo "  Repairing package database..."
+        pacman -Dk --fix 2>/dev/null
+    else
+        echo -e "  ${G}✓${N} Package database healthy"
+    fi
+
+    # Reinstall broken packages
+    broken=$(pacman -Qk 2>&1 | grep "missing files" | cut -d: -f1)
+    if [[ -n "$broken" ]]; then
+        echo "  Reinstalling broken packages..."
+        pacman -S --noconfirm $broken 2>/dev/null
+    fi
+
+    # Fix permissions
+    echo -e "\n${Y}Permissions:${N}"
+    chmod 755 / /usr /bin /sbin /lib 2>/dev/null
+    chmod 1777 /tmp /var/tmp 2>/dev/null
+    echo -e "  ${G}✓${N} Critical paths"
+
+    # Rebuild initramfs if needed
+    echo -e "\n${Y}Boot:${N}"
+    if [[ -f /boot/vmlinuz-linux ]]; then
+        echo -e "  ${G}✓${N} Kernel present"
+    else
+        echo -e "  ${Y}!${N} Kernel missing - run mkinitcpio"
+    fi
+
+    # Clear broken symlinks
+    echo -e "\n${Y}Cleanup:${N}"
+    find /usr/local/bin -xtype l -delete 2>/dev/null
+    echo -e "  ${G}✓${N} Broken symlinks removed"
+
+    # Restart failed services
+    echo -e "\n${Y}Services:${N}"
+    failed=$(systemctl list-units --state=failed --no-legend | awk '{print $1}')
+    if [[ -n "$failed" ]]; then
+        echo "$failed" | while read -r svc; do
+            systemctl restart "$svc" 2>/dev/null && echo -e "  ${G}✓${N} Restarted $svc"
+        done
+    else
+        echo -e "  ${G}✓${N} No failed services"
+    fi
+
+    log "System healed"
+    echo -e "\n${G}Healing complete${N}"
+}
+
+diagnose() {
+    echo -e "${M}Tara${N} diagnosing system...\n"
+
+    # Check disk space
+    echo -e "${Y}Disk Space:${N}"
+    df -h / /boot /home 2>/dev/null | tail -n +2
+
+    # Check memory
+    echo -e "\n${Y}Memory:${N}"
+    free -h
+
+    # Check for errors in journal
+    echo -e "\n${Y}Recent Errors:${N}"
+    journalctl -p err --since "1 hour ago" --no-pager 2>/dev/null | tail -10
+
+    # Check systemd
+    echo -e "\n${Y}Failed Services:${N}"
+    systemctl list-units --state=failed --no-legend 2>/dev/null || echo "  None"
+}
+
+case "$1" in
+    heal|h|"") heal ;;
+    diagnose|d) diagnose ;;
+    *) echo "Usage: tara [heal|diagnose]" ;;
+esac

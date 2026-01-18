@@ -1,0 +1,231 @@
+#!/bin/bash
+# VISHNU - The Preserver
+# Monitors file integrity, detects unauthorized changes, preserves state
+
+VISHNU_LOG="/var/log/atlas/vishnu.log"
+VISHNU_PID="/var/run/atlas/vishnu.pid"
+VISHNU_DB="/etc/atlas/vishnu"
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' M='\033[0;35m' C='\033[0;36m' N='\033[0m'
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$VISHNU_LOG"; }
+
+# Critical paths to monitor
+WATCH_PATHS=(
+    "/etc/passwd"
+    "/etc/shadow"
+    "/etc/sudoers"
+    "/etc/ssh/sshd_config"
+    "/etc/pam.d"
+    "/etc/systemd/system"
+    "/usr/local/bin"
+    "/root/.ssh"
+    "/root/.bashrc"
+    "/root/.profile"
+)
+
+# Create integrity database
+bless() {
+    echo -e "${C}Vishnu${N} creating integrity database..."
+    mkdir -p "$VISHNU_DB"
+
+    # Hash critical files
+    > "$VISHNU_DB/hashes.db"
+    for path in "${WATCH_PATHS[@]}"; do
+        if [[ -f "$path" ]]; then
+            sha256sum "$path" >> "$VISHNU_DB/hashes.db"
+            echo -e "  ${G}✓${N} $path"
+        elif [[ -d "$path" ]]; then
+            find "$path" -type f 2>/dev/null | while read -r file; do
+                sha256sum "$file" >> "$VISHNU_DB/hashes.db"
+            done
+            echo -e "  ${G}✓${N} $path/*"
+        fi
+    done
+
+    # Store file metadata
+    > "$VISHNU_DB/metadata.db"
+    for path in "${WATCH_PATHS[@]}"; do
+        if [[ -e "$path" ]]; then
+            stat -c "%n|%a|%U|%G|%Y" "$path" >> "$VISHNU_DB/metadata.db" 2>/dev/null
+        fi
+    done
+
+    # Package list
+    pacman -Q > "$VISHNU_DB/packages.db" 2>/dev/null
+
+    # Systemd services
+    systemctl list-unit-files --state=enabled > "$VISHNU_DB/services.db" 2>/dev/null
+
+    log "Integrity database created"
+    echo -e "${G}Blessing complete${N} - $(wc -l < "$VISHNU_DB/hashes.db") files tracked"
+}
+
+# Verify integrity
+verify() {
+    echo -e "${C}Vishnu${N} verifying integrity..."
+    local issues=0
+
+    if [[ ! -f "$VISHNU_DB/hashes.db" ]]; then
+        echo -e "  ${Y}!${N} No baseline - run 'vishnu bless' first"
+        return 1
+    fi
+
+    # Check file hashes
+    echo -e "\n${B}File Integrity:${N}"
+    while read -r line; do
+        expected_hash=$(echo "$line" | awk '{print $1}')
+        filepath=$(echo "$line" | awk '{print $2}')
+
+        if [[ ! -f "$filepath" ]]; then
+            echo -e "  ${R}✗${N} DELETED: $filepath"
+            log "ALERT: File deleted: $filepath"
+            ((issues++))
+            continue
+        fi
+
+        current_hash=$(sha256sum "$filepath" 2>/dev/null | awk '{print $1}')
+        if [[ "$current_hash" != "$expected_hash" ]]; then
+            echo -e "  ${R}✗${N} MODIFIED: $filepath"
+            log "ALERT: File modified: $filepath"
+            ((issues++))
+        fi
+    done < "$VISHNU_DB/hashes.db"
+
+    # Check for new files in watched directories
+    echo -e "\n${B}New Files:${N}"
+    for path in "${WATCH_PATHS[@]}"; do
+        if [[ -d "$path" ]]; then
+            find "$path" -type f -newer "$VISHNU_DB/hashes.db" 2>/dev/null | while read -r file; do
+                if ! grep -q "$file" "$VISHNU_DB/hashes.db"; then
+                    echo -e "  ${Y}+${N} NEW: $file"
+                    log "NOTICE: New file: $file"
+                fi
+            done
+        fi
+    done
+
+    # Check package changes
+    echo -e "\n${B}Package Changes:${N}"
+    if [[ -f "$VISHNU_DB/packages.db" ]]; then
+        current_pkgs=$(pacman -Q 2>/dev/null | sort)
+        baseline_pkgs=$(sort "$VISHNU_DB/packages.db")
+
+        new_pkgs=$(comm -13 <(echo "$baseline_pkgs") <(echo "$current_pkgs"))
+        removed_pkgs=$(comm -23 <(echo "$baseline_pkgs") <(echo "$current_pkgs"))
+
+        if [[ -n "$new_pkgs" ]]; then
+            echo "$new_pkgs" | while read -r pkg; do
+                echo -e "  ${Y}+${N} Installed: $pkg"
+            done
+        fi
+        if [[ -n "$removed_pkgs" ]]; then
+            echo "$removed_pkgs" | while read -r pkg; do
+                echo -e "  ${R}-${N} Removed: $pkg"
+            done
+        fi
+        [[ -z "$new_pkgs" && -z "$removed_pkgs" ]] && echo -e "  ${G}✓${N} No changes"
+    fi
+
+    # Check service changes
+    echo -e "\n${B}Service Changes:${N}"
+    if [[ -f "$VISHNU_DB/services.db" ]]; then
+        current_svc=$(systemctl list-unit-files --state=enabled 2>/dev/null | sort)
+        new_svc=$(comm -13 <(sort "$VISHNU_DB/services.db") <(echo "$current_svc") | grep -v "^$\|UNIT")
+
+        if [[ -n "$new_svc" ]]; then
+            echo "$new_svc" | while read -r svc; do
+                echo -e "  ${Y}+${N} New service: $svc"
+                log "NOTICE: New service enabled: $svc"
+            done
+        else
+            echo -e "  ${G}✓${N} No changes"
+        fi
+    fi
+
+    echo ""
+    if [[ $issues -eq 0 ]]; then
+        echo -e "${G}✓ System integrity preserved${N}"
+    else
+        echo -e "${R}! $issues integrity violations detected${N}"
+    fi
+
+    return $issues
+}
+
+# Watch for real-time changes
+watch_files() {
+    echo -e "${C}Vishnu${N} watching for changes..."
+    log "Watch mode started"
+
+    if ! command -v inotifywait &>/dev/null; then
+        echo "Installing inotify-tools..."
+        pacman -S --noconfirm inotify-tools &>/dev/null
+    fi
+
+    inotifywait -m -r -e modify,create,delete,move "${WATCH_PATHS[@]}" 2>/dev/null | while read -r dir event file; do
+        echo -e "  ${Y}!${N} [$event] $dir$file"
+        log "CHANGE: [$event] $dir$file"
+    done
+}
+
+# Daemon mode
+daemon_run() {
+    echo $$ > "$VISHNU_PID"
+    log "Vishnu daemon started"
+
+    while true; do
+        # Periodic integrity check (silent unless issues)
+        if ! verify &>/dev/null; then
+            log "ALERT: Integrity violations detected"
+            verify >> "$VISHNU_LOG" 2>&1
+        fi
+        sleep 300  # Every 5 minutes
+    done
+}
+
+status_show() {
+    echo -e "${C}Vishnu${N} status:"
+    if [[ -f "$VISHNU_PID" ]] && kill -0 "$(cat "$VISHNU_PID")" 2>/dev/null; then
+        echo -e "  Daemon: ${G}preserving${N}"
+    else
+        echo -e "  Daemon: ${Y}resting${N}"
+    fi
+
+    if [[ -f "$VISHNU_DB/hashes.db" ]]; then
+        echo "  Files tracked: $(wc -l < "$VISHNU_DB/hashes.db")"
+        echo "  Last blessed: $(stat -c %y "$VISHNU_DB/hashes.db" | cut -d. -f1)"
+    else
+        echo "  Database: not initialized"
+    fi
+}
+
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  VISHNU - The Preserver                                   ║
+╚═══════════════════════════════════════════════════════════╝
+
+USAGE:
+  vishnu <command>
+
+COMMANDS:
+  bless       Create integrity baseline (run after clean install)
+  verify      Check system against baseline
+  watch       Real-time file change monitoring
+  daemon      Background integrity monitoring
+  status      Show preservation status
+  log         Show change log
+
+EOF
+}
+
+case "$1" in
+    bless|b) bless ;;
+    verify|v) verify ;;
+    watch|w) watch_files ;;
+    daemon|d) daemon_run ;;
+    status|st) status_show ;;
+    log|l) tail -50 "$VISHNU_LOG" 2>/dev/null ;;
+    *) show_help ;;
+esac

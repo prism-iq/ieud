@@ -1,0 +1,131 @@
+#!/bin/bash
+# KILLSWITCH - Emergency AI Cleanup
+# Removes all AI-created components from the system
+# Use with caution - this is irreversible
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' W='\033[1;37m' N='\033[0m'
+
+GODS=(atlas buddha vishnu shiva ganesha kali indra yama agni inti viracocha tara pantheon truc clip)
+AI_FILES=(
+    "/usr/local/bin/atlas"
+    "/usr/local/bin/buddha"
+    "/usr/local/bin/vishnu"
+    "/usr/local/bin/shiva"
+    "/usr/local/bin/ganesha"
+    "/usr/local/bin/kali"
+    "/usr/local/bin/indra"
+    "/usr/local/bin/yama"
+    "/usr/local/bin/agni"
+    "/usr/local/bin/inti"
+    "/usr/local/bin/viracocha"
+    "/usr/local/bin/tara"
+    "/usr/local/bin/pantheon"
+    "/usr/local/bin/truc"
+    "/usr/local/bin/clip"
+    "/usr/local/bin/killswitch"
+)
+AI_DIRS=(
+    "/etc/atlas"
+    "/var/log/atlas"
+    "/var/run/atlas"
+    "/var/backups/viracocha"
+    "/usr/local/share/atlas"
+)
+AI_SERVICES=(
+    "/etc/systemd/system/pantheon.service"
+    "/etc/systemd/system/atlas.service"
+)
+
+echo -e "${R}"
+cat << 'EOF'
+    ╔═══════════════════════════════════════════════════════════╗
+    ║              ⚠️  KILLSWITCH - AI CLEANUP  ⚠️               ║
+    ╠═══════════════════════════════════════════════════════════╣
+    ║  This will PERMANENTLY REMOVE all AI-created:             ║
+    ║  • Security daemons (pantheon, all gods)                  ║
+    ║  • Configuration files                                    ║
+    ║  • Log files                                              ║
+    ║  • Systemd services                                       ║
+    ╚═══════════════════════════════════════════════════════════╝
+EOF
+echo -e "${N}"
+
+case "$1" in
+    --confirm|--force|-f)
+        echo -e "${R}KILLSWITCH ACTIVATED${N}\n"
+
+        # Stop all daemons first
+        echo -e "${Y}Stopping daemons...${N}"
+        for god in "${GODS[@]}"; do
+            pid_file="/var/run/atlas/${god}.pid"
+            if [[ -f "$pid_file" ]]; then
+                kill "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null
+                echo "  φ stopped $god"
+            fi
+        done
+
+        # Disable and remove services
+        echo -e "\n${Y}Removing services...${N}"
+        for svc in "${AI_SERVICES[@]}"; do
+            if [[ -f "$svc" ]]; then
+                svc_name=$(basename "$svc")
+                systemctl disable "$svc_name" 2>/dev/null
+                systemctl stop "$svc_name" 2>/dev/null
+                rm -f "$svc"
+                echo "  φ removed $svc_name"
+            fi
+        done
+        systemctl daemon-reload 2>/dev/null
+
+        # Remove directories
+        echo -e "\n${Y}Removing directories...${N}"
+        for dir in "${AI_DIRS[@]}"; do
+            if [[ -d "$dir" ]]; then
+                rm -rf "$dir"
+                echo "  φ removed $dir"
+            fi
+        done
+
+        # Remove scripts
+        echo -e "\n${Y}Removing scripts...${N}"
+        for file in "${AI_FILES[@]}"; do
+            if [[ -f "$file" ]]; then
+                rm -f "$file"
+                echo "  φ removed $(basename "$file")"
+            fi
+        done
+
+        # Clean git if exists
+        if [[ -d /usr/local/bin/.git ]]; then
+            rm -rf /usr/local/bin/.git
+            echo "  φ removed git repo"
+        fi
+
+        echo -e "\n${G}✓ AI components purged${N}"
+        echo -e "${Y}System restored to pre-AI state${N}"
+        ;;
+
+    --list|-l)
+        echo -e "${W}AI-created components:${N}\n"
+        echo "Scripts:"
+        for file in "${AI_FILES[@]}"; do
+            [[ -f "$file" ]] && echo -e "  ${G}φ${N} $file" || echo -e "  ${Y}○${N} $file (missing)"
+        done
+        echo -e "\nDirectories:"
+        for dir in "${AI_DIRS[@]}"; do
+            [[ -d "$dir" ]] && echo -e "  ${G}φ${N} $dir" || echo -e "  ${Y}○${N} $dir (missing)"
+        done
+        echo -e "\nServices:"
+        for svc in "${AI_SERVICES[@]}"; do
+            [[ -f "$svc" ]] && echo -e "  ${G}φ${N} $svc" || echo -e "  ${Y}○${N} $svc (missing)"
+        done
+        ;;
+
+    *)
+        echo "USAGE:"
+        echo "  killswitch --list     Show all AI components"
+        echo "  killswitch --confirm  REMOVE all AI components"
+        echo ""
+        echo -e "${R}WARNING: --confirm is IRREVERSIBLE${N}"
+        ;;
+esac

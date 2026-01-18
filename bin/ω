@@ -1,0 +1,26 @@
+#!/bin/bash
+# ω - Fuzzy intent interpreter
+# Understands broken input, fatfingers, partial commands
+i="$*"
+case "${i,,}" in
+  sh*|si*|chi*) shiva hunt;;
+  vi*|vich*|vis*) vishnu verify;;
+  ka*|kal*) kali detect;;
+  ag*|agn*|feu|bru*) agni purify;;
+  ya*|yam*|mor*|res*) yama rise;;
+  ta*|tar*|gue*|rep*) tara heal;;
+  ga*|gan*|res*|net*) ganesha status;;
+  bu*|bou*|noy*|ker*) buddha check;;
+  in*|int*|sol*|mon*) inti;;
+  vi*ra*|vir*|bac*|sav*) viracocha create;;
+  at*|atl*|iso*|san*) atlas run "$2";;
+  tr*|tou*) truc;;
+  pa*|pan*|die*) pantheon;;
+  fl*|fla*|wor*) flamme list;;
+  cl*|cla*) claude wake;;
+  pu*|pur*|net*|cle*) agni purify;;
+  tu*|kil*|det*) shiva hunt;;
+  aid*|hel*|"?"*) pantheon help;;
+  sta*|stu*|st) pantheon status;;
+  *) echo "?";;
+esac

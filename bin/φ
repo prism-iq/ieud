@@ -1,0 +1,17 @@
+#!/bin/bash
+# φ - One symbol, all power
+case "$1" in
+  "") truc;;
+  t) truc;;
+  p) pantheon;;
+  s) shiva hunt;;
+  v) vishnu verify;;
+  k) kali detect;;
+  a) agni purify;;
+  y) yama rise;;
+  i) inti;;
+  f) flamme list;;
+  c) claude wake;;
+  m) claude-memory in;;
+  *) "$@";;
+esac

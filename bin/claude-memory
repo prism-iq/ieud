@@ -1,0 +1,259 @@
+#!/bin/bash
+# CLAUDE-MEMORY - Persistent Memory for Claude
+# IN: Claude reads at session start
+# OUT: Claude writes at session end
+
+DB_PATH="/etc/atlas/chitragupta/claude.db"
+MEMORY_DIR="/etc/atlas/chitragupta"
+
+M='\033[0;35m' G='\033[0;32m' Y='\033[0;33m' C='\033[0;36m' B='\033[0;34m' N='\033[0m'
+
+mkdir -p "$MEMORY_DIR"
+
+# Initialize database
+init_db() {
+    sqlite3 "$DB_PATH" << 'SQL'
+CREATE TABLE IF NOT EXISTS memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    category TEXT,
+    content TEXT,
+    importance INTEGER DEFAULT 5
+);
+
+CREATE TABLE IF NOT EXISTS patterns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trigger TEXT UNIQUE,
+    action TEXT,
+    god TEXT,
+    usage_count INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS vocabulary (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    french TEXT UNIQUE,
+    command TEXT,
+    god TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    end_time DATETIME,
+    summary TEXT,
+    commits TEXT
+);
+
+CREATE TABLE IF NOT EXISTS insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    insight TEXT,
+    source TEXT
+);
+
+CREATE TABLE IF NOT EXISTS context (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+SQL
+    echo -e "${G}✓${N} Database initialized"
+}
+
+# === INPUT: What Claude reads at session start ===
+
+# Generate context for Claude
+input() {
+    echo -e "${M}╔══════════════════════════════════════════════════════════════╗${N}"
+    echo -e "${M}║  CLAUDE MEMORY - READ THIS FIRST                             ║${N}"
+    echo -e "${M}╚══════════════════════════════════════════════════════════════╝${N}"
+    echo ""
+
+    # Who is the user
+    echo -e "${C}## User Profile${N}"
+    sqlite3 "$DB_PATH" "SELECT value FROM context WHERE key='user_profile';" 2>/dev/null || \
+    echo "Flow - works with radioactive systems, prefers TTY, speaks French"
+    echo ""
+
+    # Recent memories
+    echo -e "${C}## Recent Memories${N}"
+    sqlite3 -separator " | " "$DB_PATH" \
+        "SELECT category, content FROM memories ORDER BY timestamp DESC LIMIT 10;" 2>/dev/null
+    echo ""
+
+    # Patterns
+    echo -e "${C}## Active Patterns${N}"
+    sqlite3 -separator " → " "$DB_PATH" \
+        "SELECT trigger, action FROM patterns ORDER BY usage_count DESC LIMIT 15;" 2>/dev/null
+    echo ""
+
+    # Last session
+    echo -e "${C}## Last Session${N}"
+    sqlite3 "$DB_PATH" \
+        "SELECT summary FROM sessions ORDER BY start_time DESC LIMIT 1;" 2>/dev/null
+    echo ""
+
+    # Insights
+    echo -e "${C}## Key Insights${N}"
+    sqlite3 "$DB_PATH" \
+        "SELECT insight FROM insights ORDER BY timestamp DESC LIMIT 5;" 2>/dev/null
+    echo ""
+
+    # Current pantheon
+    echo -e "${C}## Pantheon Status${N}"
+    pantheon status 2>/dev/null | grep -E "^[[:space:]]*[φ●○]" | head -15
+}
+
+# === OUTPUT: What Claude writes at session end ===
+
+# Record a memory
+out_memory() {
+    local category="$1"
+    shift
+    local content="$*"
+    sqlite3 "$DB_PATH" \
+        "INSERT INTO memories (category, content) VALUES ('$category', '$content');"
+    echo -e "${G}✓${N} Memory recorded: $category"
+}
+
+# Record a pattern
+out_pattern() {
+    local trigger="$1"
+    local action="$2"
+    local god="${3:-system}"
+    sqlite3 "$DB_PATH" \
+        "INSERT OR REPLACE INTO patterns (trigger, action, god) VALUES ('$trigger', '$action', '$god');"
+    echo -e "${G}✓${N} Pattern: $trigger → $action"
+}
+
+# Record vocabulary
+out_vocab() {
+    local french="$1"
+    local command="$2"
+    local god="${3:-system}"
+    sqlite3 "$DB_PATH" \
+        "INSERT OR REPLACE INTO vocabulary (french, command, god) VALUES ('$french', '$command', '$god');"
+    echo -e "${G}✓${N} Vocab: $french"
+}
+
+# Record insight
+out_insight() {
+    local insight="$*"
+    sqlite3 "$DB_PATH" \
+        "INSERT INTO insights (insight, source) VALUES ('$insight', 'claude');"
+    echo -e "${G}✓${N} Insight recorded"
+}
+
+# Start session
+session_start() {
+    local id=$(sqlite3 "$DB_PATH" \
+        "INSERT INTO sessions (summary) VALUES ('in progress'); SELECT last_insert_rowid();")
+    echo "$id" > "$MEMORY_DIR/current_session"
+    echo -e "${G}✓${N} Session started: #$id"
+}
+
+# End session with summary
+session_end() {
+    local summary="$*"
+    local id=$(cat "$MEMORY_DIR/current_session" 2>/dev/null)
+    local commits=$(cd /usr/local/bin && git log --oneline -5 2>/dev/null | tr '\n' ';')
+
+    if [[ -n "$id" ]]; then
+        sqlite3 "$DB_PATH" \
+            "UPDATE sessions SET end_time=CURRENT_TIMESTAMP, summary='$summary', commits='$commits' WHERE id=$id;"
+        rm -f "$MEMORY_DIR/current_session"
+        echo -e "${G}✓${N} Session #$id ended"
+    fi
+}
+
+# Set context value
+set_context() {
+    local key="$1"
+    local value="$2"
+    sqlite3 "$DB_PATH" \
+        "INSERT OR REPLACE INTO context (key, value, updated) VALUES ('$key', '$value', CURRENT_TIMESTAMP);"
+    echo -e "${G}✓${N} Context: $key"
+}
+
+# Interactive mode for Claude to dump learnings
+output_interactive() {
+    echo -e "${M}Claude Memory Output${N}"
+    echo "Enter learnings (empty line to finish each section)"
+    echo ""
+
+    echo -e "${Y}Memories (category: content):${N}"
+    while IFS=: read -r cat content; do
+        [[ -z "$cat" ]] && break
+        out_memory "$cat" "$content"
+    done
+
+    echo -e "${Y}Patterns (trigger → action):${N}"
+    while IFS='→' read -r trigger action; do
+        [[ -z "$trigger" ]] && break
+        out_pattern "$(echo $trigger | xargs)" "$(echo $action | xargs)"
+    done
+
+    echo -e "${Y}Insights:${N}"
+    while read -r insight; do
+        [[ -z "$insight" ]] && break
+        out_insight "$insight"
+    done
+}
+
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  CLAUDE-MEMORY - Persistent Memory System                 ║
+╚═══════════════════════════════════════════════════════════╝
+
+INPUT (Claude reads):
+  claude-memory in              Full context for new session
+  claude-memory recent          Recent memories only
+
+OUTPUT (Claude writes):
+  claude-memory out memory <cat> <content>
+  claude-memory out pattern <trigger> <action>
+  claude-memory out vocab <french> <command>
+  claude-memory out insight <text>
+
+SESSION:
+  claude-memory session start   Begin session
+  claude-memory session end <summary>
+
+WORKFLOW:
+  1. New Claude session starts
+  2. Run: claude-memory in | head -100
+  3. Claude reads and continues naturally
+  4. Before ending: claude-memory out ...
+  5. claude-memory session end "summary"
+
+EOF
+}
+
+# Initialize if needed
+[[ ! -f "$DB_PATH" ]] && init_db
+
+case "$1" in
+    in|input|read|"") input ;;
+    out|output|write)
+        shift
+        case "$1" in
+            memory|m) shift; out_memory "$@" ;;
+            pattern|p) shift; out_pattern "$@" ;;
+            vocab|v) shift; out_vocab "$@" ;;
+            insight|i) shift; out_insight "$@" ;;
+            *) output_interactive ;;
+        esac
+        ;;
+    session|s)
+        shift
+        case "$1" in
+            start) session_start ;;
+            end) shift; session_end "$@" ;;
+        esac
+        ;;
+    context|ctx) shift; set_context "$@" ;;
+    recent) sqlite3 "$DB_PATH" "SELECT * FROM memories ORDER BY timestamp DESC LIMIT 20;" ;;
+    init) init_db ;;
+    *) show_help ;;
+esac

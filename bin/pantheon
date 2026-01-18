@@ -1,0 +1,185 @@
+#!/bin/bash
+# PANTHEON - Master Controller for Security Gods
+# Orchestrates Atlas, Buddha, Vishnu, Shiva, Ganesha
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' M='\033[0;35m' C='\033[0;36m' O='\033[38;5;208m' W='\033[1;37m' N='\033[0m'
+
+GODS=("atlas" "buddha" "vishnu" "shiva" "ganesha" "kali" "indra" "yama" "agni" "inti" "viracocha" "tara")
+
+banner() {
+    echo -e "${M}"
+    cat << 'EOF'
+    ╔══════════════════════════════════════════════════════════════════════════════════╗
+    ║                              P A N T H E O N                                     ║
+    ║                         Security God Framework                                   ║
+    ╠══════════════════════════════════════════════════════════════════════════════════╣
+    ║  🇮🇳 भारत BHĀRAT • संस्कृत Saṃskṛta [sə̃skr̩t̪ə]                                   ║
+    ╠══════════════════════════════════════════════════════════════════════════════════╣
+    ║  Atlas   Ἄτλας [át.las]           ◈ Sandbox    Bac à sable/隔离箱              ║
+    ║  Buddha  बुद्ध [bud̪.d̪ʱə]          ☸ Kernel     Noyau/Núcleo/内核                ║
+    ║  Vishnu  विष्णु [ʋɪʂ.ɳʊ]          ॐ Preserver  Gardien/Guardián/守护            ║
+    ║  Shiva   शिव [ɕɪ.ʋə]              ☠ Destroyer  Destructeur/毁灭者               ║
+    ║  Ganesha गणेश [gə.ɳeː.ɕə]         ⚡ Gateway    Passerelle/网关                  ║
+    ║  Kali    काली [kaː.liː]           ⚔ Warrior    Guerrière/Guerrera/战士          ║
+    ║  Indra   इन्द्र [ɪn.d̪rə]          👑 King       Roi/Rey/王/Roi                   ║
+    ║  Yama    यम [jə.mə]               💀 Death      Mort/Muerte/死神/Maut            ║
+    ║  Agni    अग्नि [əg.nɪ]            🔥 Fire       Feu/Fuego/火/Feuer               ║
+    ╠══════════════════════════════════════════════════════════════════════════════════╣
+    ║  🇵🇪 TAWANTINSUYU • Runasimi [ɾu.na.si.mi] Quechua                               ║
+    ╠══════════════════════════════════════════════════════════════════════════════════╣
+    ║  Inti      [in.ti]      ☀ Sun      Soleil/Sol/太阳/Sonne    - K'anchay          ║
+    ║  Viracocha [wi.ɾa.ko.tʃa] 🌀 Creator Créateur/創造者/Schöpfer - Kamasqa          ║
+    ╠══════════════════════════════════════════════════════════════════════════════════╣
+    ║  🇳🇵 नेपाल • བོད་སྐད Bodskad [pʰø̀ʔ.kɛʔ] Tibetan                                  ║
+    ╠══════════════════════════════════════════════════════════════════════════════════╣
+    ║  Tara  སྒྲོལ་མ तारा [taː.ɾaː]    💚 Healer  Guérisseuse/Sanadora/治愈/Heilerin   ║
+    ╠══════════════════════════════════════════════════════════════════════════════════╣
+    ║  🔮 MAGIE • मन्त्र Mantra [mən.t̪ɾə]                                              ║
+    ╠══════════════════════════════════════════════════════════════════════════════════╣
+    ║  truc  [tʁyk] ✨ Tout/Todo/All/所有/Alles - Une commande pour les gouverner     ║
+    ╚══════════════════════════════════════════════════════════════════════════════════╝
+EOF
+    echo -e "${N}"
+}
+
+status_all() {
+    banner
+    echo -e "${W}φ Status:${N}\n"
+
+    for god in "${GODS[@]}"; do
+        pid_file="/var/run/atlas/${god}.pid"
+        if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null; then
+            echo -e "  ${G}φ${N} $god"
+        else
+            echo -e "  ${Y}φ${N} $god"
+        fi
+    done
+
+    echo ""
+}
+
+awaken_all() {
+    echo -e "${W}Awakening the Pantheon...${N}\n"
+
+    # Start all daemons
+    for god in "${GODS[@]}"; do
+        pid_file="/var/run/atlas/${god}.pid"
+        if [[ -f "$pid_file" ]] && kill -0 "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null; then
+            echo -e "  $god already awake"
+        else
+            $god daemon &>/dev/null &
+            disown
+            echo -e "  ${G}✓${N} $god awakened"
+        fi
+    done
+
+    sleep 1
+    echo -e "\n${G}Pantheon active${N}"
+}
+
+sleep_all() {
+    echo -e "${W}Pantheon resting...${N}\n"
+
+    for god in "${GODS[@]}"; do
+        pid_file="/var/run/atlas/${god}.pid"
+        if [[ -f "$pid_file" ]]; then
+            pid=$(cat "$pid_file" 2>/dev/null)
+            if kill "$pid" 2>/dev/null; then
+                echo -e "  ${Y}○${N} $god sleeping"
+            fi
+            rm -f "$pid_file"
+        fi
+    done
+
+    echo -e "\n${Y}Pantheon dormant${N}"
+}
+
+init_all() {
+    echo -e "${W}Initializing Pantheon...${N}\n"
+
+    # Create directories
+    mkdir -p /var/log/atlas /var/run/atlas /etc/atlas
+
+    # Buddha: create kernel baseline
+    echo -e "  ${M}☸${N} Buddha blessing kernel..."
+    buddha snapshot &>/dev/null
+
+    # Vishnu: create file baseline
+    echo -e "  ${C}ॐ${N} Vishnu blessing files..."
+    vishnu bless &>/dev/null
+
+    # Buddha: harden kernel
+    echo -e "  ${M}☸${N} Buddha hardening kernel..."
+    buddha harden &>/dev/null
+
+    # Atlas: install wrappers
+    echo -e "  ${B}◈${N} Atlas creating sandboxes..."
+    atlas wrappers &>/dev/null
+
+    echo -e "\n${G}Pantheon initialized${N}"
+    echo "Run 'pantheon awaken' to start all daemons"
+}
+
+check_all() {
+    echo -e "${W}Pantheon Security Check${N}\n"
+
+    echo -e "${M}═══ Kernel (Buddha) ═══${N}"
+    buddha check
+
+    echo -e "\n${C}═══ Files (Vishnu) ═══${N}"
+    vishnu verify
+
+    echo -e "\n${R}═══ Threats (Shiva) ═══${N}"
+    shiva hunt
+
+    echo -e "\n${O}═══ Network (Ganesha) ═══${N}"
+    ganesha scan
+}
+
+show_help() {
+    banner
+    cat << 'EOF'
+USAGE:
+  pantheon <command>
+
+COMMANDS:
+  status      Show all god statuses
+  awaken      Start all security daemons
+  sleep       Stop all daemons
+  init        Initialize (create baselines, harden)
+  check       Run full security scan
+  log         Show combined logs
+
+INDIVIDUAL GODS:
+  atlas       Userspace sandboxing
+  buddha      Kernel protection
+  vishnu      File integrity
+  shiva       Threat destruction
+  ganesha     Network security
+
+Run any god directly: atlas help, buddha help, etc.
+EOF
+}
+
+logs_show() {
+    echo -e "${W}Recent Pantheon Activity:${N}\n"
+    tail -100 /var/log/atlas/*.log 2>/dev/null | sort -t']' -k1 | tail -50
+}
+
+case "$1" in
+    status|st|"") status_all ;;
+    awaken|up|start) awaken_all ;;
+    sleep|down|stop) sleep_all ;;
+    init|i) init_all ;;
+    check|c) check_all ;;
+    log|logs|l) logs_show ;;
+    help|h|-h|--help) show_help ;;
+    *)
+        # Pass through to individual god
+        if [[ " ${GODS[*]} " =~ " $1 " ]]; then
+            "$@"
+        else
+            show_help
+        fi
+        ;;
+esac

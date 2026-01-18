@@ -1,0 +1,209 @@
+#!/bin/bash
+# SHIVA - The Destroyer
+# Terminates threats, kills malicious processes, cleans infections
+
+SHIVA_LOG="/var/log/atlas/shiva.log"
+SHIVA_PID="/var/run/atlas/shiva.pid"
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' M='\033[0;35m' C='\033[0;36m' N='\033[0m'
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$SHIVA_LOG"; }
+
+# Known bad process patterns
+THREAT_PATTERNS=(
+    "cryptominer" "xmrig" "minerd" "cgminer" "bfgminer"
+    "kinsing" "kdevtmpfsi" "kerberods"
+    "\.hidden" "\.mail" "\.nope"
+    "base64.*-d.*bash" "curl.*\|.*sh" "wget.*\|.*sh"
+)
+
+# Kill process by PID
+destroy() {
+    local pid=$1
+    local name=$2
+
+    if kill -0 "$pid" 2>/dev/null; then
+        echo -e "  ${R}☠${N} Destroying: $name (PID: $pid)"
+        log "DESTROY: $name (PID: $pid)"
+        kill -9 "$pid" 2>/dev/null
+        return 0
+    fi
+    return 1
+}
+
+# Scan for suspicious processes
+hunt() {
+    echo -e "${R}Shiva${N} hunting threats..."
+    local found=0
+
+    # Check for known threat patterns
+    for pattern in "${THREAT_PATTERNS[@]}"; do
+        pgrep -f "$pattern" 2>/dev/null | while read -r pid; do
+            name=$(ps -p "$pid" -o comm= 2>/dev/null)
+            echo -e "  ${R}!${N} Threat detected: $name (PID: $pid) [pattern: $pattern]"
+            log "THREAT: $name (PID: $pid) matched $pattern"
+            ((found++))
+        done
+    done
+
+    # Check for suspicious network connections
+    echo -e "\n${Y}Suspicious connections:${N}"
+    ss -tunp 2>/dev/null | grep -E ":(4444|5555|6666|9999|14444|45700)" | while read -r line; do
+        echo -e "  ${Y}!${N} $line"
+        log "SUSPICIOUS: $line"
+    done
+
+    # Check for processes with deleted executables (sign of compromise)
+    echo -e "\n${Y}Processes with deleted binaries:${N}"
+    ls -la /proc/*/exe 2>/dev/null | grep deleted | while read -r line; do
+        pid=$(echo "$line" | grep -oP '/proc/\K[0-9]+')
+        name=$(ps -p "$pid" -o comm= 2>/dev/null)
+        echo -e "  ${R}!${N} $name (PID: $pid) - binary deleted"
+        log "SUSPICIOUS: $name (PID: $pid) deleted binary"
+    done
+
+    # High CPU processes (potential miners)
+    echo -e "\n${Y}High CPU processes:${N}"
+    ps aux --no-headers | awk '$3 > 80 {print}' | while read -r line; do
+        pid=$(echo "$line" | awk '{print $2}')
+        cpu=$(echo "$line" | awk '{print $3}')
+        cmd=$(echo "$line" | awk '{print $11}')
+        echo -e "  ${Y}!${N} $cmd (PID: $pid) CPU: $cpu%"
+    done
+
+    [[ $found -eq 0 ]] && echo -e "  ${G}✓${N} No known threats detected"
+}
+
+# Destroy all detected threats
+purge() {
+    echo -e "${R}Shiva${N} purging threats..."
+    log "PURGE initiated"
+
+    for pattern in "${THREAT_PATTERNS[@]}"; do
+        pgrep -f "$pattern" 2>/dev/null | while read -r pid; do
+            name=$(ps -p "$pid" -o comm= 2>/dev/null)
+            destroy "$pid" "$name"
+        done
+    done
+
+    # Kill processes with deleted binaries (very suspicious)
+    ls -la /proc/*/exe 2>/dev/null | grep deleted | grep -oP '/proc/\K[0-9]+' | while read -r pid; do
+        name=$(ps -p "$pid" -o comm= 2>/dev/null)
+        # Skip known safe processes
+        [[ "$name" =~ ^(bash|zsh|fish|tmux|screen)$ ]] && continue
+        destroy "$pid" "$name (deleted binary)"
+    done
+
+    echo -e "${G}Purge complete${N}"
+}
+
+# Kill a specific process
+smite() {
+    local target="$1"
+
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+        # PID provided
+        name=$(ps -p "$target" -o comm= 2>/dev/null)
+        destroy "$target" "$name"
+    else
+        # Name provided - kill all matching
+        pgrep -f "$target" | while read -r pid; do
+            destroy "$pid" "$target"
+        done
+    fi
+}
+
+# Clean suspicious files
+cleanse() {
+    echo -e "${R}Shiva${N} cleansing system..."
+
+    # Common malware locations
+    local locations=(
+        "/tmp"
+        "/var/tmp"
+        "/dev/shm"
+        "$HOME/.cache"
+    )
+
+    for loc in "${locations[@]}"; do
+        [[ -d "$loc" ]] || continue
+
+        # Find suspicious files
+        find "$loc" -type f \( \
+            -name ".*" -o \
+            -name "*.sh" -o \
+            -perm -111 \
+        \) -mtime -1 2>/dev/null | while read -r file; do
+            # Check if file contains suspicious content
+            if file "$file" 2>/dev/null | grep -qE "executable|script"; then
+                if grep -qE "curl.*\|.*sh|wget.*\|.*bash|base64.*-d" "$file" 2>/dev/null; then
+                    echo -e "  ${R}☠${N} Removing: $file"
+                    log "CLEANSE: $file"
+                    rm -f "$file"
+                fi
+            fi
+        done
+    done
+
+    echo -e "${G}Cleanse complete${N}"
+}
+
+# Daemon mode - continuous hunting
+daemon_run() {
+    echo $$ > "$SHIVA_PID"
+    log "Shiva daemon started"
+
+    while true; do
+        # Hunt silently
+        for pattern in "${THREAT_PATTERNS[@]}"; do
+            if pgrep -f "$pattern" &>/dev/null; then
+                log "ALERT: Threat pattern detected: $pattern"
+                purge >> "$SHIVA_LOG" 2>&1
+            fi
+        done
+        sleep 30
+    done
+}
+
+status_show() {
+    echo -e "${R}Shiva${N} status:"
+    if [[ -f "$SHIVA_PID" ]] && kill -0 "$(cat "$SHIVA_PID")" 2>/dev/null; then
+        echo -e "  Daemon: ${G}hunting${N}"
+    else
+        echo -e "  Daemon: ${Y}dormant${N}"
+    fi
+    echo "  Threat patterns: ${#THREAT_PATTERNS[@]}"
+    echo "  Last purge: $(grep PURGE "$SHIVA_LOG" 2>/dev/null | tail -1 | cut -d']' -f1 | tr -d '[')"
+}
+
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  SHIVA - The Destroyer                                    ║
+╚═══════════════════════════════════════════════════════════╝
+
+USAGE:
+  shiva <command>
+
+COMMANDS:
+  hunt         Scan for threats (no action)
+  purge        Destroy all detected threats
+  smite <pid>  Kill specific process
+  cleanse      Remove suspicious files from temp dirs
+  daemon       Run as background hunter
+  status       Show Shiva status
+  log          Show destruction log
+
+EOF
+}
+
+case "$1" in
+    hunt|h) hunt ;;
+    purge|p) purge ;;
+    smite|s) shift; smite "$@" ;;
+    cleanse|c) cleanse ;;
+    daemon|d) daemon_run ;;
+    status|st) status_show ;;
+    log|l) tail -50 "$SHIVA_LOG" 2>/dev/null ;;
+    *) show_help ;;
+esac

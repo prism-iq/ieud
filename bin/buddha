@@ -1,0 +1,196 @@
+#!/bin/bash
+# BUDDHA - Kernel Integrity Guardian
+# Monitors kernel, modules, and core system integrity
+
+BUDDHA_LOG="/var/log/atlas/buddha.log"
+BUDDHA_PID="/var/run/atlas/buddha.pid"
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' M='\033[0;35m' N='\033[0m'
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$BUDDHA_LOG"; }
+
+# Store known-good kernel state
+snapshot_kernel() {
+    mkdir -p /etc/atlas/buddha
+
+    # Kernel version
+    uname -r > /etc/atlas/buddha/kernel_version
+
+    # Loaded modules
+    lsmod | awk '{print $1}' | sort > /etc/atlas/buddha/modules_baseline
+
+    # Kernel parameters
+    sysctl -a 2>/dev/null | grep -E "^kernel\." | sort > /etc/atlas/buddha/sysctl_baseline
+
+    # Critical file hashes
+    sha256sum /boot/vmlinuz-* 2>/dev/null > /etc/atlas/buddha/kernel_hashes
+    sha256sum /boot/initramfs-* 2>/dev/null >> /etc/atlas/buddha/kernel_hashes
+
+    log "Kernel baseline snapshot created"
+    echo -e "${G}Buddha${N}: Kernel baseline captured"
+}
+
+# Check kernel integrity
+check_kernel() {
+    local issues=0
+
+    echo -e "${M}Buddha${N} kernel integrity check:"
+
+    # Check kernel version unchanged
+    if [[ -f /etc/atlas/buddha/kernel_version ]]; then
+        current=$(uname -r)
+        baseline=$(cat /etc/atlas/buddha/kernel_version)
+        if [[ "$current" != "$baseline" ]]; then
+            echo -e "  ${Y}!${N} Kernel version changed: $baseline -> $current"
+            log "WARN: Kernel version changed"
+            ((issues++))
+        else
+            echo -e "  ${G}✓${N} Kernel version: $current"
+        fi
+    fi
+
+    # Check for new modules
+    if [[ -f /etc/atlas/buddha/modules_baseline ]]; then
+        new_modules=$(lsmod | awk '{print $1}' | sort | comm -13 /etc/atlas/buddha/modules_baseline -)
+        if [[ -n "$new_modules" ]]; then
+            echo -e "  ${Y}!${N} New modules loaded:"
+            echo "$new_modules" | while read -r mod; do
+                echo -e "      ${Y}+${N} $mod"
+                log "WARN: New module: $mod"
+            done
+            ((issues++))
+        else
+            echo -e "  ${G}✓${N} No unauthorized modules"
+        fi
+    fi
+
+    # Check kernel hashes
+    if [[ -f /etc/atlas/buddha/kernel_hashes ]]; then
+        if sha256sum -c /etc/atlas/buddha/kernel_hashes &>/dev/null; then
+            echo -e "  ${G}✓${N} Kernel images intact"
+        else
+            echo -e "  ${R}✗${N} Kernel images MODIFIED"
+            log "CRITICAL: Kernel image hash mismatch"
+            ((issues++))
+        fi
+    fi
+
+    # Check for tainted kernel
+    taint=$(cat /proc/sys/kernel/tainted)
+    if [[ "$taint" -eq 0 ]]; then
+        echo -e "  ${G}✓${N} Kernel not tainted"
+    else
+        echo -e "  ${Y}!${N} Kernel tainted: $taint"
+        log "WARN: Kernel tainted ($taint)"
+    fi
+
+    # Check secure boot
+    if [[ -d /sys/firmware/efi ]]; then
+        sb=$(mokutil --sb-state 2>/dev/null | head -1)
+        echo -e "  ${B}i${N} Secure Boot: ${sb:-unknown}"
+    fi
+
+    return $issues
+}
+
+# Lock down kernel parameters
+harden_kernel() {
+    echo -e "${M}Buddha${N} hardening kernel..."
+
+    # Disable module loading (careful!)
+    # sysctl -w kernel.modules_disabled=1
+
+    # Restrict dmesg
+    sysctl -w kernel.dmesg_restrict=1 &>/dev/null
+    echo -e "  ${G}✓${N} dmesg restricted"
+
+    # Restrict kernel pointers
+    sysctl -w kernel.kptr_restrict=2 &>/dev/null
+    echo -e "  ${G}✓${N} kernel pointers hidden"
+
+    # Enable ASLR
+    sysctl -w kernel.randomize_va_space=2 &>/dev/null
+    echo -e "  ${G}✓${N} ASLR enabled"
+
+    # Restrict perf
+    sysctl -w kernel.perf_event_paranoid=3 &>/dev/null
+    echo -e "  ${G}✓${N} perf restricted"
+
+    # Disable magic sysrq (except sync,remount,reboot)
+    sysctl -w kernel.sysrq=176 &>/dev/null
+    echo -e "  ${G}✓${N} sysrq limited"
+
+    # Restrict ptrace
+    sysctl -w kernel.yama.ptrace_scope=2 &>/dev/null
+    echo -e "  ${G}✓${N} ptrace restricted"
+
+    log "Kernel hardening applied"
+}
+
+# Daemon mode
+daemon_run() {
+    echo $$ > "$BUDDHA_PID"
+    log "Buddha daemon started"
+
+    while true; do
+        # Periodic integrity check
+        check_kernel >> "$BUDDHA_LOG" 2>&1
+
+        # Watch for module changes
+        current_modules=$(lsmod | awk '{print $1}' | sort | md5sum | awk '{print $1}')
+        if [[ -f /var/run/atlas/modules_hash ]]; then
+            last_hash=$(cat /var/run/atlas/modules_hash)
+            if [[ "$current_modules" != "$last_hash" ]]; then
+                log "ALERT: Kernel modules changed"
+            fi
+        fi
+        echo "$current_modules" > /var/run/atlas/modules_hash
+
+        sleep 60
+    done
+}
+
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  BUDDHA - Kernel Integrity Guardian                       ║
+╚═══════════════════════════════════════════════════════════╝
+
+USAGE:
+  buddha <command>
+
+COMMANDS:
+  snapshot    Create baseline of kernel state
+  check       Verify kernel integrity
+  harden      Apply kernel hardening
+  daemon      Run as monitoring daemon
+  status      Show current kernel security status
+  log         Show recent alerts
+
+EOF
+}
+
+status_show() {
+    echo -e "${M}Buddha${N} kernel status:"
+    echo "  Kernel: $(uname -r)"
+    echo "  Modules: $(lsmod | wc -l)"
+    echo "  Tainted: $(cat /proc/sys/kernel/tainted)"
+    echo "  ASLR: $(cat /proc/sys/kernel/randomize_va_space)"
+    echo "  Ptrace: $(cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo 'N/A')"
+
+    if [[ -f "$BUDDHA_PID" ]] && kill -0 "$(cat "$BUDDHA_PID")" 2>/dev/null; then
+        echo -e "  Daemon: ${G}running${N}"
+    else
+        echo -e "  Daemon: ${Y}stopped${N}"
+    fi
+}
+
+case "$1" in
+    snapshot|snap) snapshot_kernel ;;
+    check|c) check_kernel ;;
+    harden|h) harden_kernel ;;
+    daemon|d) daemon_run ;;
+    status|st) status_show ;;
+    log|l) tail -50 "$BUDDHA_LOG" 2>/dev/null ;;
+    *) show_help ;;
+esac

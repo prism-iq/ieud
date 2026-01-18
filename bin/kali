@@ -1,0 +1,174 @@
+#!/bin/bash
+# KALI - The Fierce Warrior (Hindu)
+# Intrusion detection, active defense, anomaly detection
+
+KALI_LOG="/var/log/atlas/kali.log"
+KALI_PID="/var/run/atlas/kali.pid"
+KALI_RULES="/etc/atlas/kali"
+
+R='\033[0;31m' G='\033[0;32m' Y='\033[0;33m' B='\033[0;34m' M='\033[0;35m' N='\033[0m'
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$KALI_LOG"; }
+
+# Detect intrusion signs
+detect() {
+    echo -e "${R}Kali${N} scanning for intrusions..."
+    local alerts=0
+
+    # Failed login attempts
+    echo -e "\n${Y}Failed Logins:${N}"
+    fails=$(journalctl -u sshd --since "1 hour ago" 2>/dev/null | grep -c "Failed password" || echo 0)
+    if [[ $fails -gt 10 ]]; then
+        echo -e "  ${R}!${N} $fails failed SSH attempts (last hour)"
+        log "ALERT: $fails failed SSH logins"
+        ((alerts++))
+    else
+        echo -e "  ${G}✓${N} $fails failed attempts (normal)"
+    fi
+
+    # Root logins
+    echo -e "\n${Y}Root Activity:${N}"
+    root_logins=$(last -n 20 root 2>/dev/null | grep -v "^$\|wtmp" | wc -l)
+    echo "  Recent root sessions: $root_logins"
+
+    # SUID/SGID changes
+    echo -e "\n${Y}SUID/SGID Files:${N}"
+    if [[ -f /etc/atlas/kali/suid_baseline ]]; then
+        current=$(find /usr /bin /sbin -perm /6000 2>/dev/null | sort)
+        new_suid=$(comm -13 /etc/atlas/kali/suid_baseline <(echo "$current"))
+        if [[ -n "$new_suid" ]]; then
+            echo "$new_suid" | while read -r f; do
+                echo -e "  ${R}!${N} NEW SUID: $f"
+                log "ALERT: New SUID file: $f"
+                ((alerts++))
+            done
+        else
+            echo -e "  ${G}✓${N} No new SUID files"
+        fi
+    else
+        echo "  Run 'kali baseline' first"
+    fi
+
+    # Suspicious cron jobs
+    echo -e "\n${Y}Cron Jobs:${N}"
+    for user_cron in /var/spool/cron/*; do
+        [[ -f "$user_cron" ]] || continue
+        user=$(basename "$user_cron")
+        if grep -qE "curl|wget|bash|sh.*http" "$user_cron" 2>/dev/null; then
+            echo -e "  ${R}!${N} Suspicious cron for $user"
+            log "ALERT: Suspicious cron job for $user"
+            ((alerts++))
+        fi
+    done
+    for sys_cron in /etc/cron.d/* /etc/cron.daily/* /etc/cron.hourly/*; do
+        [[ -f "$sys_cron" ]] || continue
+        if grep -qE "curl.*\|.*sh|wget.*\|.*bash" "$sys_cron" 2>/dev/null; then
+            echo -e "  ${R}!${N} Suspicious: $sys_cron"
+            log "ALERT: Suspicious cron: $sys_cron"
+            ((alerts++))
+        fi
+    done
+    [[ $alerts -eq 0 ]] && echo -e "  ${G}✓${N} Cron clean"
+
+    # Unauthorized SSH keys
+    echo -e "\n${Y}SSH Keys:${N}"
+    for auth_keys in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
+        [[ -f "$auth_keys" ]] || continue
+        count=$(wc -l < "$auth_keys" 2>/dev/null || echo 0)
+        echo "  $auth_keys: $count keys"
+    done
+
+    # World-writable files in critical dirs
+    echo -e "\n${Y}World-Writable (critical paths):${N}"
+    ww=$(find /etc /usr/local/bin -perm -002 -type f 2>/dev/null | head -5)
+    if [[ -n "$ww" ]]; then
+        echo "$ww" | while read -r f; do
+            echo -e "  ${Y}!${N} $f"
+        done
+    else
+        echo -e "  ${G}✓${N} None found"
+    fi
+
+    echo ""
+    [[ $alerts -gt 0 ]] && echo -e "${R}$alerts potential intrusions detected${N}" || echo -e "${G}No intrusions detected${N}"
+}
+
+# Create baseline
+baseline() {
+    echo -e "${R}Kali${N} creating detection baseline..."
+    mkdir -p /etc/atlas/kali
+
+    # SUID files
+    find /usr /bin /sbin -perm /6000 2>/dev/null | sort > /etc/atlas/kali/suid_baseline
+    echo -e "  ${G}✓${N} SUID baseline: $(wc -l < /etc/atlas/kali/suid_baseline) files"
+
+    # Current users
+    cut -d: -f1 /etc/passwd > /etc/atlas/kali/users_baseline
+    echo -e "  ${G}✓${N} Users baseline: $(wc -l < /etc/atlas/kali/users_baseline) users"
+
+    log "Baseline created"
+}
+
+# Daemon - continuous monitoring
+daemon_run() {
+    echo $$ > "$KALI_PID"
+    log "Kali daemon started - watching for intrusions"
+
+    while true; do
+        # Check for brute force
+        fails=$(journalctl -u sshd --since "5 minutes ago" 2>/dev/null | grep -c "Failed password" || echo 0)
+        if [[ $fails -gt 20 ]]; then
+            log "ALERT: Possible brute force - $fails failures in 5 min"
+            # Could auto-block IPs here
+        fi
+
+        # Check for new users
+        if [[ -f /etc/atlas/kali/users_baseline ]]; then
+            new_users=$(comm -13 /etc/atlas/kali/users_baseline <(cut -d: -f1 /etc/passwd | sort))
+            if [[ -n "$new_users" ]]; then
+                log "ALERT: New users created: $new_users"
+            fi
+        fi
+
+        sleep 60
+    done
+}
+
+status_show() {
+    echo -e "${R}Kali${N} status:"
+    if [[ -f "$KALI_PID" ]] && kill -0 "$(cat "$KALI_PID")" 2>/dev/null; then
+        echo -e "  Daemon: ${G}vigilant${N}"
+    else
+        echo -e "  Daemon: ${Y}dormant${N}"
+    fi
+    echo "  Last scan: $(grep "scanning" "$KALI_LOG" 2>/dev/null | tail -1 | cut -d']' -f1 | tr -d '[')"
+}
+
+show_help() {
+    cat << 'EOF'
+╔═══════════════════════════════════════════════════════════╗
+║  KALI - The Fierce Warrior (Hindu)                        ║
+║  Intrusion Detection & Active Defense                     ║
+╚═══════════════════════════════════════════════════════════╝
+
+USAGE:
+  kali <command>
+
+COMMANDS:
+  detect       Scan for intrusion signs
+  baseline     Create detection baseline
+  daemon       Continuous monitoring
+  status       Show Kali status
+  log          Show alerts
+
+EOF
+}
+
+case "$1" in
+    detect|d) detect ;;
+    baseline|b) baseline ;;
+    daemon) daemon_run ;;
+    status|st) status_show ;;
+    log|l) tail -50 "$KALI_LOG" 2>/dev/null ;;
+    *) show_help ;;
+esac
