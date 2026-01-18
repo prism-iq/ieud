@@ -1,101 +1,76 @@
-# φ
+# φ (phi)
 
-## English
+A minimal security shell with divine guardians.
 
-Hey! This is a security toolkit that protects your computer. Think of it as having a bunch of guardian gods watching over your system.
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-### How to install
+## Installation
 
-**Linux:**
 ```bash
+# Linux
 curl -sL https://raw.githubusercontent.com/prism-iq/ieud/main/install.sh | sudo bash
-```
 
-**Mac:**
-```bash
+# macOS
 curl -sL https://raw.githubusercontent.com/prism-iq/ieud/main/install-mac.sh | bash
-```
 
-**Windows (PowerShell as Admin):**
-```powershell
+# Windows (PowerShell as Admin)
 iwr -useb https://raw.githubusercontent.com/prism-iq/ieud/main/install.ps1 | iex
 ```
 
-### How to use
+## Usage
 
-Just type `ζ` (zeta) and you're good. That's it. One letter does everything.
-
-Can't type Greek? No problem:
-- Type anything close enough, like `sh` for Shiva, `vi` for Vishnu
-- The system understands typos and messy typing
-
-### What are these gods?
-
-Each one has a job:
-
-- **Shiva** ☠ - Kills bad stuff (viruses, malware, suspicious processes)
-- **Vishnu** ॐ - Makes sure your files haven't been tampered with
-- **Kali** ⚔ - Watches for hackers trying to get in
-- **Agni** 🔥 - Cleans up junk and temporary files
-- **Buddha** ☸ - Protects the core of your system
-- **Ganesha** ⚡ - Guards your network connections
-- **Tara** 💚 - Fixes things when they break
-- **Inti** ☀ - Shows you what's happening
-- **Viracocha** 🌊 - Backs up your stuff
-
-### Emergency stop
-
-Hold the right Ctrl key for 3 seconds. Everything stops. Use this if something goes wrong.
-
----
-
-## Français
-
-Salut ! C'est une boîte à outils de sécurité qui protège ton ordi. Imagine une bande de dieux gardiens qui surveillent ton système.
-
-### Comment installer
-
-**Linux :**
 ```bash
-curl -sL https://raw.githubusercontent.com/prism-iq/ieud/main/install.sh | sudo bash
+ζ          # Run everything
+ζ s        # Shiva - kill threats
+ζ v        # Vishnu - verify integrity
+ζ k        # Kali - detect intrusions
+ζ a        # Agni - purify system
+ζ p        # Pantheon status
 ```
 
-**Mac :**
+Typo-tolerant input:
 ```bash
-curl -sL https://raw.githubusercontent.com/prism-iq/ieud/main/install-mac.sh | bash
+ω shiva    # Works
+ω shi      # Works
+ω sh       # Works
 ```
 
-**Windows (PowerShell en Admin) :**
-```powershell
-iwr -useb https://raw.githubusercontent.com/prism-iq/ieud/main/install.ps1 | iex
+## Components
+
+| God | Symbol | Function |
+|-----|--------|----------|
+| Shiva | ☠ | Threat termination |
+| Vishnu | ॐ | File integrity |
+| Kali | ⚔ | Intrusion detection |
+| Agni | 🔥 | System purification |
+| Yama | 💀 | Process resurrection |
+| Tara | 💚 | Recovery |
+| Buddha | ☸ | Kernel protection |
+| Ganesha | ⚡ | Network security |
+| Inti | ☀ | Monitoring |
+| Viracocha | 🌊 | Backup |
+
+## Output Filters
+
+```bash
+λ <cmd>    # Greek alphabet output
+ᚱ <cmd>    # Elder Futhark runes output
 ```
 
-### Comment utiliser
+## Killswitch
 
-Tape juste `ζ` (zeta) et c'est bon. C'est tout. Une lettre fait tout.
+Hold `Right Ctrl` for 3 seconds to terminate all φ processes.
 
-Tu peux pas taper le grec ? Pas grave :
-- Tape un truc qui s'en rapproche, genre `sh` pour Shiva, `vi` pour Vishnu
-- Le système comprend les fautes de frappe
+## Requirements
 
-### C'est quoi ces dieux ?
+- Linux: firejail, bubblewrap, sqlite, inotify-tools
+- macOS: Homebrew, coreutils, sqlite3, fswatch
+- Windows: PowerShell 5.1+
 
-Chacun a un boulot :
+## Contributing
 
-- **Shiva** ☠ - Tue les trucs dangereux (virus, malwares, processus louches)
-- **Vishnu** ॐ - Vérifie que personne a touché à tes fichiers
-- **Kali** ⚔ - Surveille si des hackers essaient de rentrer
-- **Agni** 🔥 - Nettoie les fichiers temporaires et le bordel
-- **Buddha** ☸ - Protège le cœur de ton système
-- **Ganesha** ⚡ - Garde tes connexions réseau
-- **Tara** 💚 - Répare les trucs cassés
-- **Inti** ☀ - Te montre ce qui se passe
-- **Viracocha** 🌊 - Fait des sauvegardes
+Pull requests welcome. For major changes, open an issue first.
 
-### Arrêt d'urgence
+## License
 
-Maintiens Ctrl droit pendant 3 secondes. Tout s'arrête. Utilise ça si y'a un problème.
-
----
-
-φ
+[MIT](LICENSE)
