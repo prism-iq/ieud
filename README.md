@@ -1,67 +1,70 @@
 # φ
 
-> ᛏᚺᛖ ᚷᛟᛞᛊ ᛈᚱᛟᛏᛖᚲᛏ
+> ᛏᚺᛖ ᚷᛟᛞᛊ ᛈᚱᛟᛏᛖᚲᛏ | ᛚᛖᛊ ᛞᛁᛖᚢᛊ ᛈᚱᛟᛏèᚷᛖᚾᛏ
 
-```
-curl -sL https://raw.githubusercontent.com/YOU/phi/main/install.sh | sudo bash
-```
-
----
-
-## ζ
-
-| | |
-|---|---|
-| `ζ` | ᛏᛟᚢᛏ |
-| `ζ s` | ☠ ᛊᚺᛁᚹᚨ |
-| `ζ v` | ॐ ᚹᛁᛊᚺᚾᚢ |
-| `ζ k` | ⚔ ᚲᚨᛚᛁ |
-| `ζ a` | 🔥 ᚨᚷᚾᛁ |
-| `ζ p` | 🌀 ᛈᚨᚾᛏᚺᛖᛟᚾ |
-
----
-
-## ω
-
-```
-ω <anything>
-```
-
-ᛖᛚᛚᛖ ᚲᛟᛗᛈᚱᛖᚾᛞ.
-
----
-
-## ᚷᛟᛞᛊ
-
-| | | |
-|---|---|---|
-| ☠ | शिव | ᛏᚢᛖ |
-| ॐ | विष्णु | ᚹéᚱᛁᚠᛁᛖ |
-| ⚔ | काली | ᛞéᛏᛖᚲᛏᛖ |
-| 🔥 | अग्नि | ᛈᚢᚱᛁᚠᛁᛖ |
-| 💀 | यम | ᚱᛖᛊᛊᚢᛊᚲᛁᛏᛖ |
-| 💚 | तारा | ᚷᚢéᚱᛁᛏ |
-| ☸ | बुद्ध | ᚲᛖᚱᚾᛖᛚ |
-| ⚡ | गणेश | ᚱéᛊᛖᚨᚢ |
-| ☀ | ᛁᚾᛏᛁ | ᛗᛟᚾᛁᛏᛟᚱ |
-| 🌊 | ᚹᛁᚱᚨᚲᛟᚲᚺᚨ | ᛒᚨᚲᚲᚢᛈ |
-
----
-
-## ᚲᛁᛚᛚᛊᚹᛁᛏᚲᚺ
-
-```
-Ctrl-Right (3s)
+```bash
+curl -sL https://raw.githubusercontent.com/prism-iq/ieud/main/install.sh | sudo bash
 ```
 
 ---
 
-## λ ᚱ
+## EN
 
-```
-λ <cmd>  → Ελληνικά
-ᚱ <cmd>  → ᚱᚢᚾᛖᛊ
-```
+Minimal security shell. One symbol does everything.
+
+- `ζ` - all commands
+- `ω` - fuzzy input (typo tolerant)
+- `λ` - Greek output filter
+- `ᚱ` - Rune output filter
+
+### Gods
+
+| Symbol | Name | Role |
+|--------|------|------|
+| ☠ | Shiva | Kill threats |
+| ॐ | Vishnu | Verify integrity |
+| ⚔ | Kali | Detect intrusions |
+| 🔥 | Agni | Purify system |
+| 💀 | Yama | Resurrect processes |
+| 💚 | Tara | Heal/recover |
+| ☸ | Buddha | Kernel guardian |
+| ⚡ | Ganesha | Network protection |
+| ☀ | Inti | Monitor all |
+| 🌊 | Viracocha | Backup |
+
+### Killswitch
+
+Hold `Ctrl-Right` for 3 seconds.
+
+---
+
+## FR
+
+Shell de sécurité minimal. Un symbole fait tout.
+
+- `ζ` - toutes les commandes
+- `ω` - entrée floue (tolère les fautes)
+- `λ` - filtre sortie grecque
+- `ᚱ` - filtre sortie runique
+
+### Dieux
+
+| Symbole | Nom | Rôle |
+|---------|-----|------|
+| ☠ | Shiva | Tue les menaces |
+| ॐ | Vishnu | Vérifie l'intégrité |
+| ⚔ | Kali | Détecte intrusions |
+| 🔥 | Agni | Purifie le système |
+| 💀 | Yama | Ressuscite les processus |
+| 💚 | Tara | Guérit/récupère |
+| ☸ | Buddha | Gardien du kernel |
+| ⚡ | Ganesha | Protection réseau |
+| ☀ | Inti | Monitore tout |
+| 🌊 | Viracocha | Sauvegarde |
+
+### Killswitch
+
+Maintenir `Ctrl-Droit` pendant 3 secondes.
 
 ---
 
